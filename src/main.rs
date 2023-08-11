@@ -1,5 +1,6 @@
-use std::error::Error;
 use indicatif::{self, ProgressBar};
+
+use color_eyre::{Result, eyre::eyre};
 
 mod cli;
 mod sql;
@@ -7,30 +8,42 @@ mod db;
 mod source;
 mod map;
 
+pub type Id = u64;
+
 use db::Db;
 use cli::*;
 
-fn main() -> Result<(), Box<dyn Error>> {
+fn main() -> Result<()> {
 
+    color_eyre::install()?;
     let args = cli::parse();
 
     match args.cmd {
-        Source { mode: Clean }    => source::clean(),
-        Source { mode: Download } => source::download(),
+        Source { mode: Clean }    => source::clean()?,
+        Source { mode: Download } => source::download()?,
         Index { mode } => {
             let mut db = db::Db::open(&args.db_path)?;
             match mode {
-                Build => build_index(&mut db),
-                Clear => Ok(db.clear()?),
+                Build => build_index(&mut db)?,
+                Clear => db.clear()?,
             }
         }
-        Path { start, end } => todo!(),
+        Path { start, end } => {
+            let mut db = db::Db::open(&args.db_path)?;
+            let map = map::Map::build(&mut db, &end)
+                .ok_or(eyre!("destination does not exist"))?;
+            let path = map.find(&start)
+                .ok_or(eyre!("origin does not exit"))?;
+
+            println!("{}", path.join(" -> "));
+
+        },
         Map { end } => todo!(),
     }
-
+    Ok(())
 }
 
-fn build_index(db: &mut Db) -> Result<(), Box<dyn Error>> {
+fn build_index(db: &mut Db) -> Result<()> {
 
     let progress = ProgressBar::new_spinner()
         .with_message("Loading page titles");

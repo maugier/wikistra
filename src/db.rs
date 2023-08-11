@@ -1,8 +1,7 @@
-
 use sled;
 use cbor;
 
-type Id = u64;
+use super::Id;
 
 pub struct Db {
     db: sled::Db,
@@ -17,15 +16,8 @@ pub enum Error {
     Sled(#[from] sled::Error),
     #[error("encoding")]
     Encoding(#[from] std::str::Utf8Error),
-    #[error("bad link format")]
-    BadLinkFormat,
     #[error("cbor")]
     CBOR(#[from] cbor::CborError),
-}
-
-pub fn parse_link(s: &str) -> Option<(Id, Id)> {
-    let (k,v) = s.split_once(':')?;
-    Some((k.parse().ok()?, v.parse().ok()?))
 }
 
 fn encode(data: &[Id]) -> Result<Vec<u8>, Error> {
@@ -63,7 +55,7 @@ impl Db {
         Ok(())
     }
 
-    pub fn links(&mut self, to: Id) -> Result<Vec<Id>, Error> {
+    pub fn links(&self, to: Id) -> Result<Vec<Id>, Error> {
         let Some(r) = self.link.get(to.to_be_bytes())? else { return Ok(vec![]) };
         Ok(decode(r.as_ref())?)
     }
@@ -74,6 +66,8 @@ impl Db {
         self.link.insert(to.to_be_bytes(), encode(&links)?)?;
         Ok(())
     }
+
+
 
     pub fn index(&self, name: &str) -> Option<Id> {
         let bytes = self.name.get(name).ok()??;

@@ -1,4 +1,4 @@
-use std::error::Error;
+use color_eyre::Result;
 use std::fs::File;
 use ureq;
 
@@ -15,7 +15,7 @@ fn urls() -> impl Iterator<Item = String> {
     NAMES.iter().map(|f| format!("{}/enwiki-latest-{}.sql.gz", URL_BASE, f))
 }
 
-pub fn download() -> Result<(), Box<dyn Error>> { 
+pub fn download() -> Result<()> { 
     let agent = ureq::AgentBuilder::new()
         .build();
     for (url, path) in urls().zip(files()) {
@@ -34,7 +34,7 @@ pub fn download() -> Result<(), Box<dyn Error>> {
     Ok(())
 }
 
-pub fn clean() -> Result<(), Box<dyn Error>> {
+pub fn clean() -> Result<(), std::io::Error> {
     for file in files() {
         std::fs::remove_file(file)?;
     }
