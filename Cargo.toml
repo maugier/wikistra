@@ -1,0 +1,16 @@
+[package]
+name = "wikistra"
+version = "0.1.0"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+clap = { version = "4.3.21", features = ["derive"] }
+flate2 = "1.0.26"
+indicatif = "0.17.6"
+pathfinding = "4.3.1"
+sled = { version = "0.34.7", features = ["compression"] }
+smol_str = "0.2.0"
+thiserror = "1.0.44"
+ureq = "2.7.1"
