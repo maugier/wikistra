@@ -1,5 +1,6 @@
 
 use sled;
+use cbor;
 
 type Id = u64;
 
@@ -18,6 +19,8 @@ pub enum Error {
     Encoding(#[from] std::str::Utf8Error),
     #[error("bad link format")]
     BadLinkFormat,
+    #[error("cbor")]
+    CBOR(#[from] cbor::CborError),
 }
 
 pub fn parse_link(s: &str) -> Option<(Id, Id)> {
@@ -25,14 +28,28 @@ pub fn parse_link(s: &str) -> Option<(Id, Id)> {
     Some((k.parse().ok()?, v.parse().ok()?))
 }
 
+fn encode(data: &[Id]) -> Result<Vec<u8>, Error> {
+    let mut out = cbor::Encoder::from_memory();
+    out.encode(data)?;
+    Ok(out.into_bytes())
+}
+
+fn decode(mut blob: &[u8]) -> Result<Vec<Id>, Error> {
+    Ok(cbor::Decoder::from_reader(&mut blob).decode().collect::<Result<_,_>>()?)
+}
+
 impl Db {
 
-    pub fn open(path: &str) -> Result<Self, sled::Error> {
-        let db = sled::open(path)?;
+    pub fn from_sled(db: sled::Db) -> Result<Self, sled::Error> {
         let id = db.open_tree("id")?;
         let name = db.open_tree("name")?;
         let link = db.open_tree("link")?;
         Ok(Self { db, id, name, link })
+    }
+
+    pub fn open(path: &str) -> Result<Self, sled::Error> {
+        let db = sled::open(path)?;
+        Self::from_sled(db)
     }
 
     pub fn clear(&mut self) -> Result<(), sled::Error> {
@@ -46,19 +63,16 @@ impl Db {
         Ok(())
     }
 
-    pub fn add_link(&mut self, (from, to): (Id, Id)) -> Result<(), sled::Error> {
-        let key = format!("{}:{}", from, to);
-        self.link.insert(key, &[])?;
-        Ok(())
+    pub fn links(&mut self, to: Id) -> Result<Vec<Id>, Error> {
+        let Some(r) = self.link.get(to.to_be_bytes())? else { return Ok(vec![]) };
+        Ok(decode(r.as_ref())?)
     }
 
-    pub fn links(&mut self) -> impl Iterator<Item = Result<(Id,Id), Error>> {
-        self.link.into_iter()
-            .map(|pair| {
-                let (k,_v) = pair?;
-                let s = std::str::from_utf8(k.as_ref())?;
-                parse_link(s).ok_or(Error::BadLinkFormat)
-            })
+    pub fn add_link(&mut self, (from, to): (Id, Id)) -> Result<(), Error> {
+        let mut links = self.links(to)?;
+        links.push(from);
+        self.link.insert(to.to_be_bytes(), encode(&links)?)?;
+        Ok(())
     }
 
     pub fn index(&self, name: &str) -> Option<Id> {
@@ -83,9 +97,10 @@ mod test {
     use super::*;
 
     fn open_clean_db() -> Db {
-        let mut db = Db::open("./testdb").unwrap();
-        db.clear().unwrap();
-        db
+        let db = sled::Config::new()
+            .temporary(true)
+            .open().unwrap();
+        Db::from_sled(db).unwrap()
     }
 
     #[test]
@@ -111,12 +126,9 @@ mod test {
 
         db.add_link((1,2)).unwrap();
         db.add_link((2,3)).unwrap();
-        db.add_link((3,1)).unwrap();
+        db.add_link((3,2)).unwrap();
 
-        let lnks: Result<Vec<_>, _> = db.links().collect();
-        let lnks = lnks.unwrap();
-
-        assert_eq!(&lnks, &[(1,2), (2,3), (3,1)]);
+        assert_eq!(&db.links(2).unwrap(), &[1,3]);
 
     }
 

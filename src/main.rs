@@ -5,6 +5,7 @@ mod cli;
 mod sql;
 mod db;
 mod source;
+mod map;
 
 use db::Db;
 use cli::*;
