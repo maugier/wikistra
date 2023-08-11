@@ -1066,6 +1066,7 @@ dependencies = [
  "color-eyre",
  "flate2",
  "indicatif",
+ "number_prefix",
  "pathfinding",
  "sled",
  "smol_str",

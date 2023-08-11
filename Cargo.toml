@@ -11,6 +11,7 @@ clap = { version = "4.3.21", features = ["derive"] }
 color-eyre = "0.6.2"
 flate2 = "1.0.26"
 indicatif = "0.17.6"
+number_prefix = "0.4.0"
 pathfinding = "4.3.1"
 sled = { version = "0.34.7", features = ["compression"] }
 smol_str = "0.2.0"

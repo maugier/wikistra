@@ -29,16 +29,27 @@ fn main() -> Result<()> {
             }
         }
         Path { start, end } => {
-            let mut db = db::Db::open(&args.db_path)?;
-            let map = map::Map::build(&mut db, &end)
-                .ok_or(eyre!("destination does not exist"))?;
-            let path = map.find(&start)
-                .ok_or(eyre!("origin does not exit"))?;
+            let db = db::Db::open(&args.db_path)?;
+            let path = map::path(&db, &start, &end)
+                .ok_or(eyre!("invalid path"))?;
 
             println!("{}", path.join(" -> "));
 
         },
-        Map { end } => todo!(),
+        Map { end } => {
+            let mut db = db::Db::open(&args.db_path)?;
+            let map = map::Map::build(&mut db, &end)
+                .ok_or(eyre!("destination does not exist"))?;
+
+            for start in std::io::stdin().lines() {
+                let start = start?;
+                if let Some(path) = map.find(&start) {
+                    println!("{}", path.join(" -> "))
+                } else {
+                    println!("NO PATH {} -> {}", &start, &end)
+                }
+            }
+        },
     }
     Ok(())
 }
