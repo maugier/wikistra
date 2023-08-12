@@ -1,3 +1,5 @@
+//! Streaming SQL tokenizer for loading Wikipedia mysql dumps
+
 use std::{fs::File, path::Path, io::{Error, BufReader, BufRead, Bytes, Read}, iter::Peekable};
 use flate2::bufread::GzDecoder;
 use smol_str::SmolStr;
@@ -59,6 +61,8 @@ impl Iterator for Loader {
     }
 }
 
+
+/// Tokenization errors
 #[derive(Debug, Error)]
 pub enum TokenizerError {
     #[error("i/o")]
@@ -69,13 +73,18 @@ pub enum TokenizerError {
     Eof { expected: char },
 }
 
+/// Output type for the tokenizer
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Token {
+    /// keywords, table names (including quoted), or operators
     Symbol(SmolStr),
+    /// Quoted strings
     String(String),
+    /// raw numbers
     Number(i64),
 }
 
+/// A streaming SQL tokenizer. Wraps a byte stream and provides iteration over tokens.
 pub struct Tokenizer<'r> {
     source: Peekable<Bytes<&'r mut dyn Read>>,
     buffer: String,
@@ -83,10 +92,12 @@ pub struct Tokenizer<'r> {
 
 impl <'r> Tokenizer<'r> {
 
+    /// Create a tokenizer reading from a given source
     pub fn new(source: &'r mut dyn Read) -> Self {
         Self { source: source.bytes().peekable(), buffer: String::with_capacity(4096) }
     }
 
+    /// Consume white space at the start of the stream
     fn skip_white(&mut self) -> Result<(), Error> {
         while let Some(Ok(c)) = self.source.peek() {
             if c.is_ascii_whitespace() {
@@ -98,6 +109,11 @@ impl <'r> Tokenizer<'r> {
         Ok(())
     }
 
+    /// Read into the internal buffer until a stop character failing the predicate is reached.
+    /// 
+    /// The internal buffer is accessible as `self.buffer` but is also returned as a reference
+    /// for convenience.
+    /// Does not consume the stop character.
     fn collect_while<P>(&mut self, p: P) -> Result<&str, TokenizerError>
         where P: Fn(u8) -> bool
     {
@@ -117,16 +133,19 @@ impl <'r> Tokenizer<'r> {
         }       
     }
 
+    /// Parse a number
     fn parse_number(&mut self) -> Result<Token, TokenizerError> {
         self.buffer.clear();
         Ok(Token::Number(self.collect_while(|c| c.is_ascii_digit())?.parse()?))
     }
 
+    /// Parse an identifier
     fn parse_identifier(&mut self) -> Result<Token, TokenizerError> {
         self.buffer.clear();
         Ok(Token::Symbol(SmolStr::new(self.collect_while(|c| c.is_ascii_alphanumeric())?)))
     }
 
+    /// Parse a quoted string
     fn parse_string(&mut self) -> Result<Token, TokenizerError> {
         self.buffer.clear();
 
@@ -144,6 +163,7 @@ impl <'r> Tokenizer<'r> {
         
     }
 
+    /// Parse a quoted identifier
     fn parse_quoted_identifier(&mut self) -> Result<Token, TokenizerError> {
         self.buffer.clear();
         self.source.next();
@@ -185,6 +205,7 @@ impl Iterator for Tokenizer<'_> {
 
 }
 
+/// Create a tokenizer over the given source
 pub fn tokenize(source: &mut dyn Read) -> Tokenizer<'_> {
     Tokenizer::new(source)
 }

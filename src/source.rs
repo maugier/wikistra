@@ -1,3 +1,5 @@
+//! Utilities for dowloading the mysql dumps
+
 use color_eyre::{Result, eyre::eyre};
 use indicatif::{ProgressBar, ProgressStyle, ProgressState};
 use std::{fs::File, io::Seek, ops::RangeInclusive};
@@ -16,12 +18,14 @@ fn urls() -> impl Iterator<Item = String> {
     NAMES.iter().map(|f| format!("{}/enwiki-latest-{}.sql.gz", URL_BASE, f))
 }
 
+/// A parsed HTTP Content-Range header
 struct Resume<'s> {
     unit: &'s str,
     total: Option<u64>,
     range: Option<RangeInclusive<u64>>
 }
 
+/// Parse an HTTP Content-Range header if present in the request
 fn should_resume(res: &Response) -> Result<Option<Resume<'_>>> {
     let Some(range) = res.header("Content-Range") else { return Ok(None) };
     eprintln!("Range is {}", range);
@@ -39,6 +43,7 @@ fn should_resume(res: &Response) -> Result<Option<Resume<'_>>> {
     Ok(Some(Resume { unit, total, range }))
 }
 
+/// Download the source files. Resuming supported.
 pub fn download() -> Result<()> { 
 
     let style = ProgressStyle::with_template("[{elapsed_precise}] [{wide_bar:.cyan/blue}] {bytes}/{total_bytes} ({eta})").unwrap()
@@ -92,6 +97,7 @@ pub fn download() -> Result<()> {
     Ok(())
 }
 
+/// Delete the source files
 pub fn clean() -> Result<(), std::io::Error> {
     for file in files() {
         eprintln!("Removing `{}`", file);

@@ -1,6 +1,6 @@
 use indicatif::{self, ProgressBar};
-
 use color_eyre::{Result, eyre::eyre};
+
 
 mod cli;
 mod sql;

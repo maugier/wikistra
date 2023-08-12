@@ -1,3 +1,5 @@
+//! Pathfinding glue
+
 use std::collections::HashMap;
 
 use super::db::Db;

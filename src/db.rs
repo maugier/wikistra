@@ -1,12 +1,19 @@
+//! Sled-based storage for the article graph
+
 use sled;
 use cbor;
 
 use super::Id;
 
+/// Sled-backed database handle
 pub struct Db {
+    /// The main database handle
     db: sled::Db,
+    /// Map numerical IDs to article names
     id: sled::Tree,
+    /// Map article names to numerical IDs
     name: sled::Tree,
+    /// Map link destination ID to a CBOR array of source IDs
     link: sled::Tree,
 }
 
@@ -20,6 +27,7 @@ pub enum Error {
     CBOR(#[from] cbor::CborError),
 }
 
+/// Serialize and deserialize a list of IDs 
 fn encode(data: &[Id]) -> Result<Vec<u8>, Error> {
     let mut out = cbor::Encoder::from_memory();
     out.encode(data)?;
@@ -32,6 +40,7 @@ fn decode(mut blob: &[u8]) -> Result<Vec<Id>, Error> {
 
 impl Db {
 
+    /// Wrap an existing sled handle
     pub fn from_sled(db: sled::Db) -> Result<Self, sled::Error> {
         let id = db.open_tree("id")?;
         let name = db.open_tree("name")?;
@@ -39,15 +48,18 @@ impl Db {
         Ok(Self { db, id, name, link })
     }
 
+    /// Open a new sled instance from a simple path
     pub fn open(path: &str) -> Result<Self, sled::Error> {
         let db = sled::open(path)?;
         Self::from_sled(db)
     }
 
+    /// Clear the entire database
     pub fn clear(&mut self) -> Result<(), sled::Error> {
         self.db.clear()
     }
 
+    /// Insert an article in the DB. This updates both the forward and the reverse map.
     pub fn add(&mut self, id: Id, name: &str) -> Result<(), sled::Error> {
         let id = id.to_be_bytes();
         self.id.insert(id, name)?;
@@ -55,11 +67,13 @@ impl Db {
         Ok(())
     }
 
+    /// Gives a list of all articles linking to this one
     pub fn links(&self, to: Id) -> Result<Vec<Id>, Error> {
         let Some(r) = self.link.get(to.to_be_bytes())? else { return Ok(vec![]) };
         Ok(decode(r.as_ref())?)
     }
 
+    /// Adds a link from one article to another
     pub fn add_link(&mut self, (from, to): (Id, Id)) -> Result<(), Error> {
         let mut links = self.links(to)?;
         links.push(from);
@@ -67,21 +81,27 @@ impl Db {
         Ok(())
     }
 
-
-
+    /// Retrieves the article ID for a given title
     pub fn index(&self, name: &str) -> Option<Id> {
         let bytes = self.name.get(name).ok()??;
         let bytes: &[u8; 8] = bytes.as_ref().try_into().unwrap();
         Some(u64::from_be_bytes(*bytes))
     }
 
+    /// Lookup the article title given its ID
     pub fn lookup(&self, id: Id) -> Option<String> {
         let id = id.to_be_bytes();
         Some(std::str::from_utf8(self.id.get(&id).ok()??.as_ref()).ok()?.to_owned())
     }
 
+    /// Number of articles known to the DB
     pub fn len(&self) -> usize {
         self.name.len()
+    }
+
+    /// Number of links known to the DB
+    pub fn link_count(&self) -> usize {
+        self.link.len()
     }
 
 }
