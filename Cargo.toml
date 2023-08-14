@@ -17,3 +17,4 @@ sled = { version = "0.34.7", features = ["compression"] }
 smol_str = "0.2.0"
 thiserror = "1.0.44"
 ureq = "2.7.1"
+utf8-decode = "1.0.1"

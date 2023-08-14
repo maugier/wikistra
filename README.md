@@ -1,5 +1,12 @@
 # Wikistra - Dijkstra's algorithm on the Wikipedia graph
 
+Features:
+
+ - Downloads the Mysql DB dumps from wikipedia
+ - Processes the dump with a custom SQL parser in O(1) space
+ - Stores the article map in a Sled database
+
+
 ## Data sources
 
 We use these mysql dumps provided by Wikipedia.

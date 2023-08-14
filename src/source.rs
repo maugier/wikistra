@@ -9,20 +9,20 @@ static NAMES: [&str; 2] = ["page", "pagelinks"];
 
 static URL_BASE: &str = "https://dumps.wikimedia.org/enwiki/latest";
 
-fn files() -> impl Iterator<Item = String> {
+pub fn files() -> impl Iterator<Item = String> {
     NAMES.iter()
         .map(|n| format!("enwiki-latest-{}.sql.gz", n))
 }
 
-fn urls() -> impl Iterator<Item = String> {
+pub fn urls() -> impl Iterator<Item = String> {
     NAMES.iter().map(|f| format!("{}/enwiki-latest-{}.sql.gz", URL_BASE, f))
 }
 
 /// A parsed HTTP Content-Range header
-struct Resume<'s> {
-    unit: &'s str,
-    total: Option<u64>,
-    range: Option<RangeInclusive<u64>>
+pub struct Resume<'s> {
+    pub unit: &'s str,
+    pub total: Option<u64>,
+    pub range: Option<RangeInclusive<u64>>
 }
 
 /// Parse an HTTP Content-Range header if present in the request
@@ -50,7 +50,7 @@ pub fn download() -> Result<()> {
         .with_key("eta", |state: &ProgressState, w: &mut dyn std::fmt::Write| { 
             write!(w, "{:.1}s", state.eta().as_secs_f64()).unwrap()
         })
-        .progress_chars("█▒░");
+        .progress_chars("=> ");
 
     let agent = ureq::AgentBuilder::new()
         .build();

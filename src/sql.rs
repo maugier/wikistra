@@ -1,19 +1,64 @@
 //! Streaming SQL tokenizer for loading Wikipedia mysql dumps
 
-use std::{fs::File, path::Path, io::{Error, BufReader, BufRead, Bytes, Read}, iter::Peekable};
+use std::{fs::File, path::Path, io::{Error, BufReader, BufRead, Bytes, Read}, iter::{Peekable, Fuse}};
 use flate2::bufread::GzDecoder;
 use smol_str::SmolStr;
 use thiserror::Error;
+use utf8_decode::UnsafeDecoder;
 
 pub struct Loader {
-    source: BufReader<GzDecoder<BufReader<File>>>,
-    bytebuf: Vec<u8>,
+    source: Option<Tokenizer>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum Value {
+    String(String),
+    Integer(i64),
+    Float(f64),
+    Null,
+}
+
+#[derive(Error, Debug)]
+#[error("type error")]
+pub struct TypeError(Value);
+
+impl Value {
+    pub fn string(self) -> Result<String, TypeError> {
+        match self {
+            Value::String(s) => Ok(s),
+            other => Err(TypeError(other)),
+        }
+    }
+
+    pub fn int(self) -> Result<i64, TypeError> {
+        match self {
+            Value::Integer(n) => Ok(n),
+            other => Err(TypeError(other)),
+        }
+    }
+
+}
+
+#[derive(Debug, Error)]
+pub enum LoaderError {
+    #[error("tokenizer error: {0:?}")]
+    Tokenizer(#[from] TokenizerError),
+    #[error("i/o: {0:?}")]
+    IO(#[from] std::io::Error),
+    #[error("syntax error: unexpected token {0:?}, expecting {1}")]
+    Syntax(Token, SmolStr),
+    #[error("EOF")]
+    EOF,
 }
 
 impl Loader {
-    pub fn load<P: AsRef<Path> + ?Sized>(path: &P) -> Result<Self, Error> {
+    pub fn load_gz_file<P: AsRef<Path> + ?Sized>(path: &P) -> Result<Self, LoaderError> {
         let compressed = BufReader::new(File::open(path)?);
-        let mut source = BufReader::new(GzDecoder::new(compressed));
+        let source = BufReader::new(GzDecoder::new(compressed));
+        Self::load(source)
+    }
+
+    pub fn load<R: BufRead + 'static>(mut source: R) -> Result<Self, LoaderError> {
 
         let mut linebuf = String::new();
         let linebuf = &mut linebuf;
@@ -23,41 +68,79 @@ impl Loader {
             if linebuf.contains("DISABLE KEYS") { break }
         }
 
-        Ok(Self { source, bytebuf: Vec::with_capacity(1024) })
+        let source = tokenize(source).fuse().peekable();
+        let mut loader = Self { source: Some(source)};
+        loader.expect_insert_into()?;
+
+        Ok(loader)
     }
+
+    fn eof(&mut self) -> Result<bool, LoaderError> {
+        let Some(source) = &mut self.source else { return Ok(false) };
+        Ok(source.eof()?)
+    }
+
+    fn token(&mut self) -> Result<Token, LoaderError> {
+        Ok(self.source
+               .as_mut().ok_or(LoaderError::EOF)?
+               .next().ok_or_else(|| { self.source = None; LoaderError::EOF})??)
+    }
+
+    fn expect(&mut self, token: Token) -> Result<(), LoaderError> {
+        match self.token()? {
+            t if t == token => Ok(()),
+            other => Err(LoaderError::Syntax(other, format!("{:?}", token).into()))
+        }
+    }
+
+    fn expect_insert_into(&mut self) -> Result<(), LoaderError> {
+        let Some(source) = &mut self.source else { return Err(LoaderError::EOF) };
+        source.expect(sym("INSERT"))?;
+        source.expect(sym("INTO"))?;
+        source.next();
+        source.expect(sym("VALUES"))
+    }
+
+    fn tuple(&mut self) -> Result<Vec<Value>, LoaderError> {
+        self.expect(sym("("))?;
+        let mut tuple = vec![];
+
+        loop {
+            let v = self.token()?
+                .value().map_err(|t| LoaderError::Syntax(t, "value".into()))?;
+            tuple.push(v);
+
+            match self.token()? {
+                Token::Symbol(s) if s == "," => continue,
+                Token::Symbol(s) if s == ")" => break,
+                other => return Err(LoaderError::Syntax(other, "`)` or `,`".into()))
+            }
+        }
+
+        match self.token()? {
+            Token::Symbol(s) if s == "," => (),
+            Token::Symbol(s) if s == ";" => {
+                if !self.eof()? {
+            
+                    self.expect_insert_into()?;
+                } 
+            }
+            other => return Err(LoaderError::Syntax(other, "`,` or `;`".into()))
+        }
+
+        Ok(tuple)
+    }
+
+
 }
 
 
 impl Iterator for Loader {
-    type Item = Result<Vec<String>, Error>;
+    type Item = Result<Vec<Value>, LoaderError>;
 
     fn next(&mut self) -> Option<Self::Item> {
-
-        let Self { source, bytebuf } = self;
-
-        let _size = match source.read_until(b'(', bytebuf) {
-            Ok(size) => size,
-            Err(e) => return Some(Err(e)),
-        };
-
-        bytebuf.clear();
-
-        let size = match source.read_until(b')', bytebuf) {
-            Ok(size) => size,
-            Err(e) => return Some(Err(e)),
-        };
-
-        if size == 0 { return None }
-
-        let line = match String::from_utf8(bytebuf[..(size-1)].to_owned()) {
-            Ok(line) => line,
-            Err(e) => return Some(Err(Error::new(std::io::ErrorKind::InvalidData, e))),
-        };
-
-        Some(Ok(line.split(",")
-            .map(str::to_owned)
-            .collect()
-        ))
+        self.source.as_ref()?;
+        Some(self.tuple())
     }
 }
 
@@ -65,36 +148,63 @@ impl Iterator for Loader {
 /// Tokenization errors
 #[derive(Debug, Error)]
 pub enum TokenizerError {
-    #[error("i/o")]
+    #[error("i/o error: {0:?}")]
     IO(#[from] std::io::Error),
-    #[error("parse")]
-    Parse(#[from] std::num::ParseIntError),
+    #[error("parsing integer: {0:?}")]
+    ParseInt(#[from] std::num::ParseIntError),
+    #[error("parsing float: {0:?}")]
+    ParseFloat(#[from] std::num::ParseFloatError),
     #[error("unexpected end of stream, expected {expected}")]
     Eof { expected: char },
+    #[error("incomplete string")]
+    IncompleteString,
+    #[error("invalid escape sequence `\\{0}`")]
+    InvalidEscape(char)
 }
 
 /// Output type for the tokenizer
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum Token {
     /// keywords, table names (including quoted), or operators
     Symbol(SmolStr),
-    /// Quoted strings
-    String(String),
-    /// raw numbers
-    Number(i64),
+
+    /// Values
+    Value(Value),
+}
+
+pub fn sym(s: &str) -> Token { Token::Symbol(SmolStr::new_inline(s)) }
+pub fn str<S: Into<String>>(s: S) -> Token { Token::Value(Value::String(s.into()))}
+pub fn num(n: i64) -> Token { Token::Value( Value::Integer(n) ) }
+
+impl Token {
+    fn value(self) -> Result<Value, Token> {
+        match self {
+            Token::Value(v) => Ok(v),
+            other => Err(other),
+        }
+    }
 }
 
 /// A streaming SQL tokenizer. Wraps a byte stream and provides iteration over tokens.
-pub struct Tokenizer<'r> {
-    source: Peekable<Bytes<&'r mut dyn Read>>,
+pub struct Tokenizer {
+    source: Peekable<UnsafeDecoder<Bytes<Box<dyn Read>>>>,
     buffer: String,
 }
 
-impl <'r> Tokenizer<'r> {
+impl Tokenizer {
 
     /// Create a tokenizer reading from a given source
-    pub fn new(source: &'r mut dyn Read) -> Self {
-        Self { source: source.bytes().peekable(), buffer: String::with_capacity(4096) }
+    pub fn new(source: Box<dyn Read>) -> Self {
+        Self { source: UnsafeDecoder::new(source.bytes()).peekable(), buffer: String::with_capacity(4096) }
+    }
+
+    pub fn expect(&mut self, token: Token) -> Result<(), LoaderError> {
+        match self.next() {
+            Some(Ok(t)) if t == token => Ok(()),
+            Some(Ok(t)) => Err(LoaderError::Syntax(t, format!("{:?}", token).into())),
+            Some(Err(e)) => Err(e)?,
+            None => Err(LoaderError::EOF),
+        }
     }
 
     /// Consume white space at the start of the stream
@@ -115,7 +225,7 @@ impl <'r> Tokenizer<'r> {
     /// for convenience.
     /// Does not consume the stop character.
     fn collect_while<P>(&mut self, p: P) -> Result<&str, TokenizerError>
-        where P: Fn(u8) -> bool
+        where P: Fn(char) -> bool
     {
         loop {
             match self.source.peek() {
@@ -136,13 +246,34 @@ impl <'r> Tokenizer<'r> {
     /// Parse a number
     fn parse_number(&mut self) -> Result<Token, TokenizerError> {
         self.buffer.clear();
-        Ok(Token::Number(self.collect_while(|c| c.is_ascii_digit())?.parse()?))
+        self.collect_while(|c| c.is_ascii_digit())?;
+
+        let v = if self.source.peek().and_then(|t| t.as_ref().ok()) == Some(&'.') {
+
+            self.buffer.push(self.source.next().unwrap().unwrap() as char);
+            self.collect_while(|c| c.is_ascii_digit())?;
+            Value::Float(self.buffer.parse()?)
+
+        } else {
+            Value::Integer(self.buffer.parse()?)
+        };
+
+        Ok(Token::Value(v))
     }
 
     /// Parse an identifier
     fn parse_identifier(&mut self) -> Result<Token, TokenizerError> {
         self.buffer.clear();
-        Ok(Token::Symbol(SmolStr::new(self.collect_while(|c| c.is_ascii_alphanumeric())?)))
+        self.collect_while(|c| c.is_ascii_alphanumeric())?;
+
+        let token = if self.buffer == "NULL" {
+            Token::Value(Value::Null)
+        } else {
+            Token::Symbol(SmolStr::new(&self.buffer))
+        };
+
+        Ok(token)
+
     }
 
     /// Parse a quoted string
@@ -150,14 +281,26 @@ impl <'r> Tokenizer<'r> {
         self.buffer.clear();
 
         loop {
-            self.source.next();
-            self.collect_while(|c| c != b'\'')?;
-            self.source.next().ok_or(TokenizerError::Eof { expected: '\'' })??;
+            self.source.next(); // initial ' 
 
-            if let Some(Ok(b'\'')) = self.source.peek() {
+            loop {
+                let c = self.source.next().ok_or(TokenizerError::Eof { expected: '\'' })??;
+
+                match c {
+                    '\\' => match self.source.next().ok_or(TokenizerError::IncompleteString)?? {
+                        c@('\'' | '\\' | '"') => self.buffer.push(c),
+                        other => return Err(TokenizerError::InvalidEscape(other))
+                    },
+                    '\'' => break,
+                    other => self.buffer.push(other)
+                }
+
+            }
+
+            if let Some(Ok('\'')) = self.source.peek() { // Double quote escape
                 self.buffer.push('\'')
-            } else {
-                return Ok(Token::String(self.buffer.clone()))
+            } else { // actual end of quote
+                return Ok(Token::Value(Value::String(self.buffer.clone())))
             }
         }
         
@@ -167,57 +310,66 @@ impl <'r> Tokenizer<'r> {
     fn parse_quoted_identifier(&mut self) -> Result<Token, TokenizerError> {
         self.buffer.clear();
         self.source.next();
-        self.collect_while(|c| c != b'`')?;
+        self.collect_while(|c| c != '`')?;
         self.source.next().ok_or(TokenizerError::Eof { expected: '`' })??;
         Ok(Token::Symbol(SmolStr::from(&self.buffer)))
     }
 
+    fn next_token(&mut self) -> Result<Option<Token>, TokenizerError> {
+        self.skip_white()?;
+        let next = match self.source.peek() { 
+            None => return Ok(None),
+            Some(Err(_)) => self.source.next().unwrap()?,
+            Some(Ok(c)) => *c,
+        };
+        
+        let tok = match next {
+            c if c.is_ascii_digit() => self.parse_number(),
+            c if c.is_ascii_alphabetic() => self.parse_identifier(),
+            '`' => self.parse_quoted_identifier(),
+            '\'' => self.parse_string(),
+            c => {
+                self.source.next();
+                self.buffer.clear();
+                Ok(Token::Symbol(SmolStr::new_inline(c.encode_utf8(&mut [0; 4]))))
+            }           
+        }?;
+
+        Ok(Some(tok))
+
+    }
+
+    fn eof(&mut self) -> Result<bool, TokenizerError> {
+        self.skip_white()?;
+        Ok(self.source.peek().is_none())
+    }
+
+
 }
 
-impl Iterator for Tokenizer<'_> {
+impl Iterator for Tokenizer{
     type Item = Result<Token, TokenizerError>;
 
 
     fn next(&mut self) -> Option<Self::Item> {
-
-        if let Err(e) = self.skip_white() {
-            return Some(Err(e.into()))
-        }
-
-        let &Ok(c) = self.source.peek()? else {
-            return Some(Err(self.source.next().unwrap().unwrap_err().into()))
-        };
-
-        let tok = match c {
-            c if c.is_ascii_digit() => self.parse_number(),
-            c if c.is_ascii_alphabetic() => self.parse_identifier(),
-            b'`' => self.parse_quoted_identifier(),
-            b'\'' => self.parse_string(),
-            c => {
-                self.source.next();
-                Ok(Token::Symbol(SmolStr::new_inline(std::str::from_utf8(&[c]).unwrap())))
-            }
-        };
-
-        Some(tok)
-
+        self.next_token().transpose() 
     }
 
 }
 
 /// Create a tokenizer over the given source
-pub fn tokenize(source: &mut dyn Read) -> Tokenizer<'_> {
-    Tokenizer::new(source)
+pub fn tokenize<R: Read + 'static>(source: R) -> Tokenizer {
+    Tokenizer::new(Box::new(source))
 }
 
 #[test]
 fn sample_tokenization() {
-    use Token::*;
-    let sym = |s| { Token::Symbol(SmolStr::new_inline(s)) };
 
-    let sample_statement = b"  INSERT   INTO `my table` VALUES (1,'l o l', 0), (2, 'o''escape', 'yourmom'   )     ";
+    //let sym = |s| { Token::Symbol(SmolStr::new_inline(s)) };
 
-    let tokens: Result<Vec<_>,_> = tokenize(&mut &sample_statement[..]).collect();
+    let sample_statement = b"  INSERT   INTO `my table` VALUES (1,'l o l', 0), (2, 'o''escape', 'es\\\"ca\\\' ped'   )     ";
+
+    let tokens: Result<Vec<_>,_> = tokenize(&sample_statement[..]).collect();
     let tokens = tokens.unwrap();
 
     assert_eq!(&tokens, 
@@ -226,19 +378,19 @@ fn sample_tokenization() {
           sym("my table"),
           sym("VALUES"),
           sym("("),
-          Number(1),
+          num(1),
           sym(","),
-          Token::String("l o l".into()),
+          str("l o l"),
           sym(","),
-          Number(0),
+          num(0),
           sym(")"),
           sym(","),
           sym("("),
-          Number(2),
+          num(2),
           sym(","),
-          Token::String("o'escape".into()),
+          str("o'escape"),
           sym(","),
-          Token::String("yourmom".into()),
+          str("es\"ca' ped"),
           sym(")"),
 
         ]

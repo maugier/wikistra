@@ -21,6 +21,9 @@ pub enum Command {
     /// Manage source files
     Source { mode: SourceCommand },
 
+    /// Parse sql files into CSV
+    Parse { table: usize },
+
     /// Manage database
     Index { mode: IndexCommand },
 
