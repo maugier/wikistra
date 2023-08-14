@@ -2,10 +2,10 @@
 
 use color_eyre::{Result, eyre::eyre};
 use indicatif::{ProgressBar, ProgressStyle, ProgressState};
-use std::{fs::File, io::Seek, ops::RangeInclusive};
+use std::{fs::File, io::Seek, ops::RangeInclusive, os::unix::prelude::MetadataExt};
 use ureq::{self, Response};
 
-static NAMES: [&str; 2] = ["page", "pagelinks"];
+static NAMES: [&str; 3] = ["page", "pagelinks", "redirect"];
 
 static URL_BASE: &str = "https://dumps.wikimedia.org/enwiki/latest";
 
@@ -43,6 +43,22 @@ fn should_resume(res: &Response) -> Result<Option<Resume<'_>>> {
     Ok(Some(Resume { unit, total, range }))
 }
 
+pub fn is_fresh(agent: &ureq::Agent, url: &str, path: &str) -> Option<()> {
+    let file = File::open(path)
+        .ok()?;
+    let local = file.metadata().ok()?
+        .size();
+
+    let remote = agent.head(url)
+        .call()
+        .ok()?
+        .header("Content-Length")?
+        .parse().ok()?;
+
+    if local == remote { Some(()) } else { None }
+
+}
+
 /// Download the source files. Resuming supported.
 pub fn download() -> Result<()> { 
 
@@ -55,6 +71,11 @@ pub fn download() -> Result<()> {
     let agent = ureq::AgentBuilder::new()
         .build();
     for (url, path) in urls().zip(files()) {
+
+        if is_fresh(&agent, &url, &path).is_some() {
+            eprintln!("{} up to date.", path);
+            continue;
+        }
 
         let mut file = File::options()
             .create(true)
