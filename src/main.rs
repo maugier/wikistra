@@ -1,6 +1,6 @@
-use std::{fs::File, io::{BufReader, BufRead, SeekFrom}};
+use std::{fs::File, io::{BufReader, BufRead, SeekFrom, BufWriter, stdin}, collections::{BTreeMap}};
 
-use flate2::bufread::GzDecoder;
+use flate2::{bufread::GzDecoder, write::GzEncoder, Compression};
 use indicatif::{self, ProgressBar, ProgressStyle, ProgressState};
 use color_eyre::{Result, eyre::eyre};
 
@@ -15,6 +15,7 @@ pub type Id = u64;
 
 use memory::Db;
 use cli::*;
+use regex::{RegexBuilder};
 
 fn main() -> Result<()> {
 
@@ -26,7 +27,26 @@ fn main() -> Result<()> {
         Index => build_index(&mut memory::Db::new())?, 
             
         Search { query } => {
-            todo!()
+                
+            let (source, progress) = open_gz_with_progress("./titledb.cbor.gz")?;
+            progress.set_message("Loading title database");
+            let index: BTreeMap<String, Id> = serde_cbor::from_reader(source)?;
+            progress.finish_and_clear();
+            drop(progress);
+
+            if let Some(query) = query {
+                search_db(&query, &index)?
+            } else {
+                eprintln!("Enter one query per line.");
+                for line in stdin().lines() {
+                    let line = line?;
+                    if line == "" { continue };
+                    if let Err(e) = search_db(line.trim(), &index) {
+                        eprintln!("{}", e)
+                    }
+                }
+            }
+
         }
 
         Parse { table } => {
@@ -115,8 +135,9 @@ fn build_index(db: &mut Db) -> Result<()> {
     drop(progress);
 
     eprint!("Saving...");
-    let tdb = File::options().create(true).write(true).open("./titledb.cbor")?;
-    serde_cbor::to_writer(tdb, &db.titles())?;
+    let tdb = File::options().create(true).write(true).open("./titledb.cbor.gz")?;
+    let compressed = GzEncoder::new(BufWriter::new( tdb), Compression::default());
+    serde_cbor::to_writer(compressed, &db.titles())?;
     eprintln!("ok.");
     
     (good, count) = (0,0);
@@ -168,6 +189,19 @@ fn parse_table(table: usize) -> Result<()> {
         println!("{:?}", row);
     }
 
+    Ok(())
+}
+
+fn search_db(query: &str, index: &BTreeMap<String, Id>) -> Result<()> {
+    let matcher = RegexBuilder::new(query)
+    .case_insensitive(true)
+    .build()?;
+
+    for (name, id) in index {
+        if matcher.is_match(&name) {
+            println!("[{}] {}", id, name);
+        }
+    }
     Ok(())
 }
 
