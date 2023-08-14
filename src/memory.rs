@@ -1,6 +1,6 @@
 //! In-memory database
 
-use std::{collections::{HashMap, HashSet}, rc::Rc, borrow::Borrow};
+use std::{collections::{HashMap, HashSet, BTreeMap}, rc::Rc, borrow::Borrow};
 use serde::{Serialize, ser::{SerializeStruct}};
 
 use super::Id;
@@ -33,7 +33,7 @@ impl Serialize for Rcs {
 }
 
 #[derive(Serialize)]
-pub struct Titles<'d>(&'d HashMap<Rcs, u64>);
+pub struct Titles<'d>(&'d BTreeMap<Rcs, u64>);
 
 #[derive(Serialize)]
 pub struct Links<'d>(&'d HashMap<u64, HashSet<u64>>);
@@ -44,7 +44,7 @@ pub struct Db {
     /// Map numerical IDs to article names
     id: HashMap<Id, Rcs>,
     /// Map article names to numerical IDs
-    name: HashMap<Rcs, Id>,
+    name: BTreeMap<Rcs, Id>,
     /// Map link destination ID to a CBOR array of source IDs
     link: HashMap<Id, HashSet<Id>>,
 }

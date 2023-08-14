@@ -28,7 +28,11 @@ pub enum Command {
     /// Build index
     Index,
 
-    Search { query: String },
+    /// Search the title database
+    Search {
+        /// A regex to match the titles to. If absent, will work in interactive mode.
+        query: Option<String>
+    },
 
     /// Compute single path from start to end
     Path { start: String, end: String },
