@@ -186,7 +186,9 @@ pub enum Token {
 }
 
 pub const fn sym(s: &str) -> Token { Token::Symbol(SmolStr::new_inline(s)) }
+#[cfg(test)]
 pub fn str<S: Into<String>>(s: S) -> Token { Token::Value(Value::String(s.into()))}
+#[cfg(test)]
 pub const fn num(n: i64) -> Token { Token::Value( Value::Integer(n) ) }
 
 impl Token {

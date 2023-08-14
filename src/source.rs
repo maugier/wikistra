@@ -96,12 +96,3 @@ pub fn download() -> Result<()> {
     }
     Ok(())
 }
-
-/// Delete the source files
-pub fn clean() -> Result<(), std::io::Error> {
-    for file in files() {
-        eprintln!("Removing `{}`", file);
-        std::fs::remove_file(file)?;
-    }
-    Ok(())
- }

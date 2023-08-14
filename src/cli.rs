@@ -1,8 +1,6 @@
-use clap::{Parser, Subcommand, ValueEnum};
+use clap::{Parser, Subcommand};
 
 pub use Command::*;
-pub use SourceCommand::*;
-pub use IndexCommand::*;
 
 pub fn parse() -> Args {
     Args::parse()
@@ -19,13 +17,18 @@ pub struct Args {
 #[derive(Subcommand)]
 pub enum Command {
     /// Manage source files
-    Source { mode: SourceCommand },
+    Download,
 
     /// Parse sql files into CSV
-    Parse { table: usize },
+    Parse { 
+        /// Index of the table to parse
+        table: usize
+    },
 
-    /// Manage database
-    Index { mode: IndexCommand },
+    /// Build index
+    Index,
+
+    Search { query: String },
 
     /// Compute single path from start to end
     Path { start: String, end: String },
@@ -33,15 +36,4 @@ pub enum Command {
     /// Compute full map to end, read several starts from stdin
     Map { end: String }
 
-}
-#[derive(ValueEnum, Clone, Copy)]
-pub enum SourceCommand {
-    Download,
-    Clean,
-}
-
-#[derive(ValueEnum, Clone, Copy)]
-pub enum IndexCommand {
-    Build,
-    Clear,
 }

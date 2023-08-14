@@ -7,13 +7,13 @@ use color_eyre::{Result, eyre::eyre};
 
 mod cli;
 mod sql;
-mod db;
 mod source;
 mod map;
+mod memory;
 
 pub type Id = u64;
 
-use db::Db;
+use memory::Db;
 use cli::*;
 
 fn main() -> Result<()> {
@@ -22,20 +22,18 @@ fn main() -> Result<()> {
     let args = cli::parse();
 
     match args.cmd {
-        Source { mode: Clean }    => source::clean()?,
-        Source { mode: Download } => source::download()?,
-        Index { mode } => {
-            let mut db = db::Db::open(&args.db_path)?;
-            match mode {
-                Build => build_index(&mut db)?,
-                Clear => db.clear()?,
-            }
+        Download => source::download()?,
+        Index => build_index(&mut memory::Db::new())?, 
+            
+        Search { query } => {
+            todo!()
         }
+
         Parse { table } => {
             parse_table(table)?
         }
         Path { start, end } => {
-            let db = db::Db::open(&args.db_path)?;
+            let db = memory::Db::new();
             let path = map::path(&db, &start, &end)
                 .ok_or(eyre!("invalid path"))?;
 
@@ -43,7 +41,7 @@ fn main() -> Result<()> {
 
         },
         Map { end } => {
-            let mut db = db::Db::open(&args.db_path)?;
+            let mut db = memory::Db::new();
             let map = map::Map::build(&mut db, &end)
                 .ok_or(eyre!("destination does not exist"))?;
 
@@ -84,7 +82,6 @@ fn open_gz_with_progress(path: &str) -> Result<(impl BufRead, ProgressBar), std:
     let progress = length
         .map(|l| ProgressBar::new(l))
         .unwrap_or(ProgressBar::new_spinner())
-        .with_message(format!("Downloading {}", &path))
         .with_style(style);
 
     let compressed = BufReader::new(progress.wrap_read(file));
@@ -98,28 +95,40 @@ fn build_index(db: &mut Db) -> Result<()> {
     let (source, progress) = open_gz_with_progress("./enwiki-latest-page.sql.gz")?;
     progress.set_message("Building title index");
 
-    db.clear()?;
+    let (mut count, mut good) = (0,0);
 
     for line in sql::Loader::load(source)? {
         let mut line = line?.into_iter();
         let mut field = || { line.next().ok_or(eyre!("invalid tuple"))};
+        count += 1;
 
         let id = field()?.int()? as u64;
         let ns = field()?.int()?;
         if ns != 0 { continue }
         let title = field()?.string()?;
 
-        db.add(id, &title)?;
+        db.add(id, title);
+        good += 1;
     }
 
-    progress.finish_with_message(format!("Loaded {} titles.", db.len()));
+    progress.finish_with_message(format!("Processed {} titles, {} in main namespace.", count, good));
     drop(progress);
+
+    eprint!("Saving...");
+    let tdb = File::options().create(true).write(true).open("./titledb.cbor")?;
+    serde_cbor::to_writer(tdb, &db.titles())?;
+    eprintln!("ok.");
     
+    (good, count) = (0,0);
+
     let (source, progress) = open_gz_with_progress("./enwiki-latest-pagelinks.sql.gz")?;
+    progress.set_message("Building link map");
 
     for line in sql::Loader::load(source)? {
         let mut line = line?.into_iter();
         let mut field = || { line.next().ok_or(eyre!("invalid tuple"))};
+
+        count += 1;
 
         let from = field()?.int()? as u64;
         let namespace = field()?.int()?;
@@ -128,14 +137,23 @@ fn build_index(db: &mut Db) -> Result<()> {
         let from_ns = field()?.int()?;
         if from_ns != 0 { continue; }
 
-        let Some(to) = db.index(&title) else { continue };
+        let Some(to) = db.index(&title) else { 
+            eprintln!("Warning: Title not found in index: {}", &title);
+            continue
+        };
 
-        db.add_link((from, to))?;
+        db.add_link((from, to));
+        good += 1;
 
     }
 
-    progress.finish_with_message(format!("Loaded {} links.", db.link_count()));
+    progress.finish_with_message(format!("Processed {} links, {} in main namespace", count, good));
     drop(progress);
+
+    eprint!("Saving...");
+    let tdb = File::options().create(true).write(true).open("./linkdb.cbor")?;
+    serde_cbor::to_writer(tdb, &db.linkmap())?;
+    eprintln!("ok.");
 
     Ok(())
 }
