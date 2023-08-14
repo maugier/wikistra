@@ -7,7 +7,8 @@ use thiserror::Error;
 use utf8_decode::UnsafeDecoder;
 
 pub struct Loader {
-    source: Option<Tokenizer>,
+    source: Peekable<Fuse<Tokenizer>>,
+    expecting_tuple: bool,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -69,45 +70,48 @@ impl Loader {
         }
 
         let source = tokenize(source).fuse().peekable();
-        let mut loader = Self { source: Some(source)};
-        loader.expect_insert_into()?;
+        Ok(Self { source, expecting_tuple: false })
 
-        Ok(loader)
     }
 
-    fn eof(&mut self) -> Result<bool, LoaderError> {
-        let Some(source) = &mut self.source else { return Ok(false) };
-        Ok(source.eof()?)
+    fn peek(&mut self) -> Result<Option<&Token>, TokenizerError> {
+        // This unwrap fuckery is required because capturing in the pattern can't pass borrowck
+        match self.source.peek() {
+            Some(Err(_)) => Err(self.source.next().unwrap().unwrap_err()),
+            Some(Ok(_)) => Ok(Some(self.source.peek().unwrap().as_ref().unwrap())),
+            None => Ok(None),
+        }
+    }
+
+    fn maybe_token(&mut self) -> Result<Option<Token>, TokenizerError> {
+        self.source.next().transpose()
     }
 
     fn token(&mut self) -> Result<Token, LoaderError> {
-        Ok(self.source
-               .as_mut().ok_or(LoaderError::EOF)?
-               .next().ok_or_else(|| { self.source = None; LoaderError::EOF})??)
+        self.maybe_token()?.ok_or(LoaderError::EOF)
     }
 
     fn expect(&mut self, token: Token) -> Result<(), LoaderError> {
         match self.token()? {
             t if t == token => Ok(()),
-            other => Err(LoaderError::Syntax(other, format!("{:?}", token).into()))
+            other => Err(LoaderError::Syntax(other, format!("{:?}", token).into())),
         }
     }
 
     fn expect_insert_into(&mut self) -> Result<(), LoaderError> {
-        let Some(source) = &mut self.source else { return Err(LoaderError::EOF) };
-        source.expect(sym("INSERT"))?;
-        source.expect(sym("INTO"))?;
-        source.next();
-        source.expect(sym("VALUES"))
+        self.expect(sym("INSERT"))?;
+        self.expect(sym("INTO"))?;
+        self.token()?;
+        self.expect(sym("VALUES"))
     }
 
-    fn tuple(&mut self) -> Result<Vec<Value>, LoaderError> {
+    fn expect_tuple(&mut self) -> Result<Vec<Value>, LoaderError> {
         self.expect(sym("("))?;
         let mut tuple = vec![];
 
         loop {
             let v = self.token()?
-                .value().map_err(|t| LoaderError::Syntax(t, "value".into()))?;
+                .value().map_err(|t| LoaderError::Syntax(t, "a literal value".into()))?;
             tuple.push(v);
 
             match self.token()? {
@@ -120,15 +124,25 @@ impl Loader {
         match self.token()? {
             Token::Symbol(s) if s == "," => (),
             Token::Symbol(s) if s == ";" => {
-                if !self.eof()? {
-            
-                    self.expect_insert_into()?;
-                } 
+                self.expecting_tuple = false;
             }
             other => return Err(LoaderError::Syntax(other, "`,` or `;`".into()))
         }
 
         Ok(tuple)
+    }
+
+    fn next_tuple(&mut self) -> Result<Option<Vec<Value>>, LoaderError> {
+        if !self.expecting_tuple {
+            if self.peek()? == Some(&sym("INSERT")) {
+                self.expect_insert_into()?;
+                self.expecting_tuple = true;
+            } else {
+                return Ok(None)
+            }
+        }
+
+        self.expect_tuple().map(Option::Some)
     }
 
 
@@ -139,8 +153,7 @@ impl Iterator for Loader {
     type Item = Result<Vec<Value>, LoaderError>;
 
     fn next(&mut self) -> Option<Self::Item> {
-        self.source.as_ref()?;
-        Some(self.tuple())
+        self.next_tuple().transpose()
     }
 }
 
@@ -172,9 +185,9 @@ pub enum Token {
     Value(Value),
 }
 
-pub fn sym(s: &str) -> Token { Token::Symbol(SmolStr::new_inline(s)) }
+pub const fn sym(s: &str) -> Token { Token::Symbol(SmolStr::new_inline(s)) }
 pub fn str<S: Into<String>>(s: S) -> Token { Token::Value(Value::String(s.into()))}
-pub fn num(n: i64) -> Token { Token::Value( Value::Integer(n) ) }
+pub const fn num(n: i64) -> Token { Token::Value( Value::Integer(n) ) }
 
 impl Token {
     fn value(self) -> Result<Value, Token> {
@@ -196,15 +209,6 @@ impl Tokenizer {
     /// Create a tokenizer reading from a given source
     pub fn new(source: Box<dyn Read>) -> Self {
         Self { source: UnsafeDecoder::new(source.bytes()).peekable(), buffer: String::with_capacity(4096) }
-    }
-
-    pub fn expect(&mut self, token: Token) -> Result<(), LoaderError> {
-        match self.next() {
-            Some(Ok(t)) if t == token => Ok(()),
-            Some(Ok(t)) => Err(LoaderError::Syntax(t, format!("{:?}", token).into())),
-            Some(Err(e)) => Err(e)?,
-            None => Err(LoaderError::EOF),
-        }
     }
 
     /// Consume white space at the start of the stream
@@ -338,12 +342,6 @@ impl Tokenizer {
         Ok(Some(tok))
 
     }
-
-    fn eof(&mut self) -> Result<bool, TokenizerError> {
-        self.skip_white()?;
-        Ok(self.source.peek().is_none())
-    }
-
 
 }
 
