@@ -254,6 +254,7 @@ impl Tokenizer {
     /// Parse a number
     fn parse_number(&mut self) -> Result<Token, TokenizerError> {
         self.buffer.clear();
+        self.collect_while(|c| c == '-')?;
         self.collect_while(|c| c.is_ascii_digit())?;
 
         let v = if self.source.peek().and_then(|t| t.as_ref().ok()) == Some(&'.') {
@@ -333,6 +334,7 @@ impl Tokenizer {
         
         let tok = match next {
             c if c.is_ascii_digit() => self.parse_number(),
+            '-' => self.parse_number(),
             c if c.is_ascii_alphabetic() => self.parse_identifier(),
             '`' => self.parse_quoted_identifier(),
             '\'' => self.parse_string(),
