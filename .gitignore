@@ -1,1 +1,6 @@
 /target
+.vscode
+*.sq3
+*.sql.gz
+perf.data*
+flamegraph.svg
