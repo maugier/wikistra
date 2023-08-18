@@ -5,7 +5,7 @@ use indicatif::{ProgressBar, ProgressStyle, ProgressState};
 use std::{fs::File, io::Seek, ops::RangeInclusive, os::unix::prelude::MetadataExt};
 use ureq::{self, Response};
 
-static NAMES: [&str; 3] = ["page", "pagelinks", "redirect"];
+static NAMES: [&str; 3] = ["page", "redirect", "pagelinks"];
 
 static URL_BASE: &str = "https://dumps.wikimedia.org/enwiki/latest";
 
@@ -73,7 +73,7 @@ pub fn download() -> Result<()> {
     for (url, path) in urls().zip(files()) {
 
         if is_fresh(&agent, &url, &path).is_some() {
-            eprintln!("{} up to date.", path);
+            eprintln!("{} already present.", path);
             continue;
         }
 

@@ -6,6 +6,8 @@ use smol_str::SmolStr;
 use thiserror::Error;
 use utf8_decode::UnsafeDecoder;
 
+pub mod regex;
+
 pub struct Loader {
     source: Peekable<Fuse<Tokenizer>>,
     expecting_tuple: bool,
@@ -187,9 +189,9 @@ pub enum Token {
 
 pub const fn sym(s: &str) -> Token { Token::Symbol(SmolStr::new_inline(s)) }
 #[cfg(test)]
-pub fn str<S: Into<String>>(s: S) -> Token { Token::Value(Value::String(s.into()))}
+pub fn strt<S: Into<String>>(s: S) -> Token { Token::Value(Value::String(s.into()))}
 #[cfg(test)]
-pub const fn num(n: i64) -> Token { Token::Value( Value::Integer(n) ) }
+pub const fn numt(n: i64) -> Token { Token::Value( Value::Integer(n) ) }
 
 impl Token {
     fn value(self) -> Result<Value, Token> {
@@ -378,19 +380,19 @@ fn sample_tokenization() {
           sym("my table"),
           sym("VALUES"),
           sym("("),
-          num(1),
+          numt(1),
           sym(","),
-          str("l o l"),
+          strt("l o l"),
           sym(","),
-          num(0),
+          numt(0),
           sym(")"),
           sym(","),
           sym("("),
-          num(2),
+          numt(2),
           sym(","),
-          str("o'escape"),
+          strt("o'escape"),
           sym(","),
-          str("es\"ca' ped"),
+          strt("es\"ca' ped"),
           sym(")"),
 
         ]

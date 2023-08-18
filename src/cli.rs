@@ -1,4 +1,4 @@
-use clap::{Parser, Subcommand};
+use clap::{Parser, Subcommand, ValueEnum};
 
 pub use Command::*;
 
@@ -14,6 +14,24 @@ pub struct Args {
     pub db_path: String,
 }
 
+#[derive(PartialEq,Eq,Debug,ValueEnum,Clone,Copy)]
+pub enum Table {
+    Page,
+    Redirect,
+    Link,
+}
+
+impl Into<usize> for Table {
+    fn into(self) -> usize {
+        use Table::*;
+        match self {
+            Page => 0,
+            Redirect => 1,
+            Link => 2,
+        }
+    }
+}
+
 #[derive(Subcommand)]
 pub enum Command {
     /// Manage source files
@@ -22,11 +40,11 @@ pub enum Command {
     /// Parse sql files into CSV
     Parse { 
         /// Index of the table to parse
-        table: usize
+        table: Table
     },
 
     /// Build index
-    Index,
+    Index { mode: Option<Table> },
 
     /// Search the title database
     Search {

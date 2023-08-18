@@ -1,6 +1,6 @@
-use std::{fs::File, io::{BufReader, BufRead, SeekFrom, BufWriter, stdin}, collections::{BTreeMap}};
+use std::{fs::File, io::{BufReader, BufRead, SeekFrom, stdin}, collections::{BTreeMap}};
 
-use flate2::{bufread::GzDecoder, write::GzEncoder, Compression};
+use flate2::{bufread::GzDecoder};
 use indicatif::{self, ProgressBar, ProgressStyle, ProgressState};
 use color_eyre::{Result, eyre::eyre};
 
@@ -10,10 +10,11 @@ mod sql;
 mod source;
 mod map;
 mod memory;
+mod sqlite;
 
-pub type Id = u64;
+pub type Id = u32;
 
-use memory::Db;
+use sqlite::Db;
 use cli::*;
 use regex::{RegexBuilder};
 
@@ -24,33 +25,38 @@ fn main() -> Result<()> {
 
     match args.cmd {
         Download => source::download()?,
-        Index => build_index(&mut memory::Db::new())?, 
-            
+        Index { mode } => {
+            let mut db = Db::new("./db.sq3")?;
+            if let Some(Table::Page) | None = mode { build_page_index(&mut db)?; }
+            if let Some(Table::Redirect) | None = mode { build_redirect_index(&mut db)?; }
+            if let Some(Table::Link) | None = mode { build_link_index(&mut db)?; }
+        },    
+
         Search { query } => {
                 
-            let (source, progress) = open_gz_with_progress("./titledb.cbor.gz")?;
-            progress.set_message("Loading title database");
-            let index: BTreeMap<String, Id> = serde_cbor::from_reader(source)?;
-            progress.finish_and_clear();
-            drop(progress);
+            let mut db = Db::new("./db.sq3")?;
 
             if let Some(query) = query {
-                search_db(&query, &index)?
+                for (id, title) in &db.search(&query) {
+                    println!("[{}] {}", id, &**title)
+                }
             } else {
                 eprintln!("Enter one query per line.");
                 for line in stdin().lines() {
                     let line = line?;
                     if line == "" { continue };
-                    if let Err(e) = search_db(line.trim(), &index) {
-                        eprintln!("{}", e)
+                    
+                    for (id, title) in &db.search(&line) {
+                        println!("[{}] {}", id, &**title)
                     }
+
                 }
             }
 
         }
 
         Parse { table } => {
-            parse_table(table)?
+            parse_table(table.into())?
         }
         Path { start, end } => {
             let db = memory::Db::new();
@@ -110,7 +116,7 @@ fn open_gz_with_progress(path: &str) -> Result<(impl BufRead, ProgressBar), std:
     Ok((reader, progress))
 }
 
-fn build_index(db: &mut Db) -> Result<()> {
+fn build_page_index(db: &mut Db) -> Result<()> {
 
     let (source, progress) = open_gz_with_progress("./enwiki-latest-page.sql.gz")?;
     progress.set_message("Building title index");
@@ -122,25 +128,22 @@ fn build_index(db: &mut Db) -> Result<()> {
         let mut field = || { line.next().ok_or(eyre!("invalid tuple"))};
         count += 1;
 
-        let id = field()?.int()? as u64;
+        let id = field()?.int()? as Id;
         let ns = field()?.int()?;
         if ns != 0 { continue }
         let title = field()?.string()?;
 
-        db.add(id, title);
+        db.add(id, title)?;
         good += 1;
     }
 
     progress.finish_with_message(format!("Processed {} titles, {} in main namespace.", count, good));
-    drop(progress);
+    Ok(())
+}
 
-    eprint!("Saving...");
-    let tdb = File::options().create(true).write(true).open("./titledb.cbor.gz")?;
-    let compressed = GzEncoder::new(BufWriter::new( tdb), Compression::default());
-    serde_cbor::to_writer(compressed, &db.titles())?;
-    eprintln!("ok.");
+fn build_link_index(db: &mut Db) -> Result<()> {
     
-    (good, count) = (0,0);
+    let (mut count, mut good, mut skip, mut bad) = (0,0,0,0);
 
     let (source, progress) = open_gz_with_progress("./enwiki-latest-pagelinks.sql.gz")?;
     progress.set_message("Building link map");
@@ -151,31 +154,56 @@ fn build_index(db: &mut Db) -> Result<()> {
 
         count += 1;
 
-        let from = field()?.int()? as u64;
+        let from = field()?.int()? as Id;
         let namespace = field()?.int()?;
-        if namespace != 0 { continue; }
+        if namespace != 0 { skip += 1; continue; }
         let title = field()?.string()?;
         let from_ns = field()?.int()?;
-        if from_ns != 0 { continue; }
+        if from_ns != 0 { skip += 1; continue; }
 
-        let Some(to) = db.index(&title) else { 
-            eprintln!("Warning: Title not found in index: {}", &title);
+        let Some(to) = db.index(&title) else {
+            bad += 1;
+            if bad < 1000 {
+                eprintln!("Warning: Title not found in index: {}", &title);
+            } else if bad == 1000 {
+                eprintln!("Too many bad articles, skipping report");
+            }
             continue
         };
 
-        db.add_link((from, to));
+        db.add_link((from, to))?;
         good += 1;
 
     }
 
-    progress.finish_with_message(format!("Processed {} links, {} in main namespace", count, good));
+    progress.finish_with_message(format!("Processed {} links ({} good, {} wrong namespace, {} missing from index)", count, good, skip, bad));
     drop(progress);
 
-    eprint!("Saving...");
-    let tdb = File::options().create(true).write(true).open("./linkdb.cbor")?;
-    serde_cbor::to_writer(tdb, &db.linkmap())?;
-    eprintln!("ok.");
+    Ok(())
+}
 
+fn build_redirect_index(db: &mut Db) -> Result<()> {
+
+    let (source, progress) = open_gz_with_progress("./enwiki-latest-redirect.sql.gz")?;
+    progress.set_message("Building redirect index");
+
+    let (mut count, mut good) = (0,0);
+
+    for line in sql::Loader::load(source)? {
+        let mut line = line?.into_iter();
+        let mut field = || { line.next().ok_or(eyre!("invalid tuple"))};
+        count += 1;
+
+        let id = field()?.int()? as Id;
+        let ns = field()?.int()?;
+        if ns != 0 { continue }
+        let title = field()?.string()?;
+
+        db.add_redirect(id, &title)?;
+        good += 1;
+    }
+
+    progress.finish_with_message(format!("Processed {} titles, {} in main namespace.", count, good));
     Ok(())
 }
 

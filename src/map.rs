@@ -12,7 +12,7 @@ pub struct Map<'d> {
     map: HashMap<Id, (Id, usize)>,
 }
 
-fn successors<'d>(db: &'d Db) -> impl Fn(&u64) -> Box<dyn Iterator<Item=(Id,usize)> + 'd> {
+fn successors<'d>(db: &'d Db) -> impl Fn(&Id) -> Box<dyn Iterator<Item=(Id,usize)> + 'd> {
     |&to| {
         Box::new(db.links(to).into_iter()
             .map(|id| (id, 1)))

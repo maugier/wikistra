@@ -33,10 +33,10 @@ impl Serialize for Rcs {
 }
 
 #[derive(Serialize)]
-pub struct Titles<'d>(&'d BTreeMap<Rcs, u64>);
+pub struct Titles<'d>(&'d BTreeMap<Rcs, Id>);
 
 #[derive(Serialize)]
-pub struct Links<'d>(&'d HashMap<u64, HashSet<u64>>);
+pub struct Links<'d>(&'d HashMap<Id, HashSet<Id>>);
 
 /// Sled-backed database handle
 #[derive(Default)]
