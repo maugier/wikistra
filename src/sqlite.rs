@@ -103,6 +103,11 @@ mod test {
 
     fn open_clean_db() -> Db {
         let mut db = Db::new("/tmp/dummydb.sq3").unwrap();
+        db.inner.execute_batch("
+            CREATE TABLE page (id int(8) primary key, title text unique);
+            CREATE TABLE link(`to` int(8), `from` int(8), primary key (`to`, `from`));
+            CREATE TABLE redirect (title text primary key, id int(8));
+        ").unwrap();
         db.clear();
         db
     }
