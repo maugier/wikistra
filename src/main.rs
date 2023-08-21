@@ -18,6 +18,8 @@ use sqlite::Db;
 use cli::*;
 use regex::{RegexBuilder};
 
+static DEFAULT_DB_PATH: &str = "./db.sq3";
+
 fn main() -> Result<()> {
 
     color_eyre::install()?;
@@ -26,7 +28,7 @@ fn main() -> Result<()> {
     match args.cmd {
         Download => source::download()?,
         Index { mode } => {
-            let mut db = Db::new("./db.sq3")?;
+            let mut db = Db::new(DEFAULT_DB_PATH)?;
             if let Some(Table::Page) | None = mode { build_page_index(&mut db)?; }
             if let Some(Table::Redirect) | None = mode { build_redirect_index(&mut db)?; }
             if let Some(Table::Link) | None = mode { build_link_index(&mut db)?; }
@@ -34,7 +36,7 @@ fn main() -> Result<()> {
 
         Search { query } => {
                 
-            let mut db = Db::new("./db.sq3")?;
+            let mut db = Db::new(DEFAULT_DB_PATH)?;
 
             if let Some(query) = query {
                 for (id, title) in &db.search(&query) {
@@ -59,16 +61,15 @@ fn main() -> Result<()> {
             parse_table(table.into())?
         }
         Path { start, end } => {
-            let db = memory::Db::new();
-            let path = map::path(&db, &start, &end)
-                .ok_or(eyre!("invalid path"))?;
+            let db = sqlite::Db::new(DEFAULT_DB_PATH)?;
+            let path = map::path(&db, &start, &end)?;
 
             println!("{}", path.join(" -> "));
 
         },
         Map { end } => {
-            let mut db = memory::Db::new();
-            let map = map::Map::build(&mut db, &end)
+            let db = sqlite::Db::new(DEFAULT_DB_PATH)?;
+            let map = map::Map::build(&db, &end)
                 .ok_or(eyre!("destination does not exist"))?;
 
             for start in std::io::stdin().lines() {
@@ -217,19 +218,6 @@ fn parse_table(table: usize) -> Result<()> {
         println!("{:?}", row);
     }
 
-    Ok(())
-}
-
-fn search_db(query: &str, index: &BTreeMap<String, Id>) -> Result<()> {
-    let matcher = RegexBuilder::new(query)
-    .case_insensitive(true)
-    .build()?;
-
-    for (name, id) in index {
-        if matcher.is_match(&name) {
-            println!("[{}] {}", id, name);
-        }
-    }
     Ok(())
 }
 

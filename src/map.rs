@@ -2,12 +2,13 @@
 
 use std::collections::HashMap;
 
-use super::memory::Db;
+use super::sqlite::Db;
 use super::Id;
 use pathfinding::directed::dijkstra::{dijkstra_all, dijkstra};
+use thiserror::Error;
 
 pub struct Map<'d> {
-    db: &'d mut Db,
+    db: &'d Db,
     to: Id,
     map: HashMap<Id, (Id, usize)>,
 }
@@ -19,17 +20,29 @@ fn successors<'d>(db: &'d Db) -> impl Fn(&Id) -> Box<dyn Iterator<Item=(Id,usize
     }
 }
 
-pub fn path<'d>(db: &'d Db, from: &str, to: &str) -> Option<Vec<&'d str>> {
-    let from = db.index(from)?;
-    let to = db.index(to)?;  
+#[derive(Error,Debug)]
+pub enum PathError {
+    #[error("Unknown article: {0}")]
+    UnknownTitle(String),
+    #[error("No path found")]
+    NoPathFound
+}
 
-    let path = dijkstra(&from, successors(db), |&x| x == to)?;
-    path.0.iter().map(|&i| db.lookup(i)).collect()
+pub fn path(db: &Db, from: &str, to: &str) -> Result<Vec<String>, PathError> {
+    let from = db.index(from)
+        .ok_or_else(|| PathError::UnknownTitle(from.to_owned()))?;
+    let to = db.index(to)
+        .ok_or_else(|| PathError::UnknownTitle(to.to_owned()))?;  
+
+    let path = dijkstra(&from, successors(db), |&x| x == to)
+        .ok_or(PathError::NoPathFound)?;
+    Ok(path.0.iter().map(|&i| db.lookup(i).unwrap_or("???".to_owned())).collect::<Vec<_>>())
+
 }
 
 impl<'d> Map<'d> {
 
-    pub fn build(db: &'d mut Db, to: &str) -> Option<Self> {
+    pub fn build(db: &'d Db, to: &str) -> Option<Self> {
 
         let to = db.index(to)?;
 
@@ -38,8 +51,8 @@ impl<'d> Map<'d> {
         Some(Self { db, to, map })
     }
 
-    pub fn find<'a>(&'a self, from: &'a str) -> Option<Vec<&'a str>> {
-        let mut path = vec![from];
+    pub fn find<'a>(&self, from: &str) -> Option<Vec<String>> {
+        let mut path = vec![from.to_owned()];
 
         let mut from = self.db.index(from)?;
 

@@ -1,5 +1,5 @@
 //! SQLite backend
-use rusqlite::{Connection, Error, Row};
+use rusqlite::{Connection, Error, Row, OpenFlags};
 
 
 use super::Id;
@@ -17,7 +17,15 @@ impl Drop for Db {
 impl Db {
 
     pub fn new(path: &str) -> Result<Self, Error> {
-        let inner = Connection::open(path)?;
+        let mut fresh = false;
+        let mut flags = OpenFlags::default();
+        flags.remove(OpenFlags::SQLITE_OPEN_CREATE);
+        let inner = Connection::open_with_flags(path, flags)
+            .or_else(|e| {
+                fresh = true;
+                Connection::open(path)
+            })?;
+
         inner.execute_batch("
             PRAGMA journal_mode = OFF;
             PRAGMA synchronous = 0;
@@ -25,7 +33,18 @@ impl Db {
             PRAGMA locking_mode = EXCLUSIVE;
             PRAGMA temp_store = MEMORY;
         ")?;
-        Ok(Self { inner })
+        let mut new = Self { inner };
+        if fresh { new.initialize()? };
+        Ok(new)
+    }
+
+    fn initialize(&mut self) -> Result<(), Error> {
+        self.inner.execute_batch("
+            CREATE TABLE page (id int(8) primary key, title text unique) without rowid;
+            CREATE TABLE link(`to` int(8), `from` int(8), primary key (`to`, `from`)) without rowid;
+            CREATE TABLE redirect (id int(8) primary key, title text) without rowid;
+            CREATE TABLE redirect_link (`to` int(8), `from` int(8), primary key (`to`, `from`));
+        ")
     }
 
     pub fn search(&mut self, regex: &str) -> Vec<(Id, String)> {
@@ -54,7 +73,7 @@ impl Db {
 
     /// Gives a list of all articles linking to this one
     pub fn links(&self, to: Id) -> Vec<Id> {
-        self.inner.prepare_cached("SELECT `from` FROM link WHERE `to` = ?1")
+        self.inner.prepare_cached("SELECT `from` FROM link WHERE `to` = ?1 UNION SELECT `from` FROM redirect_link WHERE `to` = ?1")
             .unwrap()
             .query((to,))
             .unwrap() 
@@ -69,7 +88,7 @@ impl Db {
 
     /// Adds a link from one article to another
     pub fn add_link(&mut self, link: (Id, Id)) -> Result<(), Error> {
-        self.inner.prepare_cached("INSERT OR IGNORE INTO link VALUES (?1,?2)")?
+        self.inner.prepare_cached("INSERT OR IGNORE INTO link(`from`, `to`) VALUES (?1,?2)")?
             .execute(link)?;
         Ok(())
     }
@@ -84,7 +103,7 @@ impl Db {
     pub fn index(&self, name: &str) -> Option<Id> {
         self.inner.query_row("SELECT id FROM page WHERE title = ?1", (name,),
         |row| row.get(0))
-        .ok()
+        .unwrap_or_else(|e| panic!("Boom: {}", e))
     }
 
     /// Lookup the article title given its ID
@@ -102,13 +121,9 @@ mod test {
     use super::*;
 
     fn open_clean_db() -> Db {
-        let mut db = Db::new("/tmp/dummydb.sq3").unwrap();
-        db.inner.execute_batch("
-            CREATE TABLE page (id int(8) primary key, title text unique);
-            CREATE TABLE link(`to` int(8), `from` int(8), primary key (`to`, `from`));
-            CREATE TABLE redirect (title text primary key, id int(8));
-        ").unwrap();
-        db.clear();
+        let path = "file::memory:";
+        let mut db = Db::new(path).unwrap();
+        db.initialize();
         db
     }
 
@@ -132,7 +147,6 @@ mod test {
     #[test]
     fn sample_link_data() {
         let mut db = open_clean_db();
-
         db.add_link((1,2)).unwrap();
         db.add_link((2,3)).unwrap();
         db.add_link((3,2)).unwrap();

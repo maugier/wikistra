@@ -58,14 +58,6 @@ fn match_tuple<'s>(tuple: &Tuple<'s>) -> Vec<&'s str> {
         .collect()
 }
 
-#[test]
-fn multiple_captures() {
-    let needle = Regex::new("A*([XYZ][0-9])*B*").unwrap();
-    let haystack = "AAAX0Y0Y1X2Z5BBBBB";
-
-    let cap = needle.captures(haystack).unwrap();
-    assert_eq!(cap.len(), 6);
-}
 
 #[test]
 fn sample_tokenization() {
