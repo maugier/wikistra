@@ -77,6 +77,7 @@ impl <T: Ord + Copy> Front<T> {
                 });
             }
         }
+        tmp.sort();
         std::mem::swap(tmp, &mut self.edge);
         tmp.clear();
     }
