@@ -48,14 +48,11 @@ pub enum Command {
 
     /// Search the title database
     Search {
-        /// A regex to match the titles to. If absent, will work in interactive mode.
+        /// A SQL pattern to match strings with. If absent, will work in interactive mode.
         query: Option<String>
     },
 
     /// Compute single path from start to end
     Path { start: String, end: String },
-
-    /// Compute full map to end, read several starts from stdin
-    Map { end: String }
 
 }

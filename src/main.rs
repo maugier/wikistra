@@ -8,7 +8,6 @@ use color_eyre::{Result, eyre::eyre};
 mod cli;
 mod sql;
 mod source;
-mod map;
 mod sqlite;
 mod path;
 
@@ -74,20 +73,6 @@ fn main() -> Result<()> {
 
             println!("{}", path.join(" -> "));
 
-        },
-        Map { end } => {
-            let db = sqlite::Db::new(DEFAULT_DB_PATH)?;
-            let map = map::Map::build(&db, &end)
-                .ok_or(eyre!("destination does not exist"))?;
-
-            for start in std::io::stdin().lines() {
-                let start = start?;
-                if let Some(path) = map.find(&start) {
-                    println!("{}", path.join(" -> "))
-                } else {
-                    println!("NO PATH {} -> {}", &start, &end)
-                }
-            }
         },
     }
     Ok(())
