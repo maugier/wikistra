@@ -21,7 +21,7 @@ impl Db {
         let mut flags = OpenFlags::default();
         flags.remove(OpenFlags::SQLITE_OPEN_CREATE);
         let inner = Connection::open_with_flags(path, flags)
-            .or_else(|e| {
+            .or_else(|_| {
                 fresh = true;
                 Connection::open(path)
             })?;
@@ -49,20 +49,15 @@ impl Db {
         ")
     }
 
-    pub fn search(&mut self, regex: &str) -> Vec<(Id, String)> {
+    pub fn search(&mut self, regex: &str) -> Vec<(Id, String, Option<String>)> {
 
-        self.inner.prepare_cached("SELECT id, title FROM page WHERE title LIKE ?1")
+        self.inner.prepare_cached("SELECT page.id, page.title, redirect.title FROM page LEFT JOIN redirect ON id = id WHERE page.title LIKE ?1")
             .unwrap()
             .query((regex,))
             .unwrap()
-            .mapped(|r| Ok((r.get(0)?, r.get(1)?)))
+            .mapped(|r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))
             .map(|r| r.unwrap())
             .collect()
-    }
-
-    pub fn clear(&mut self) {
-        self.inner.execute("DELETE FROM page", ()).unwrap();
-        self.inner.execute("DELETE FROM link", ()).unwrap();
     }
 
     /// Insert an article in the DB. This updates both the forward and the reverse map.
@@ -85,17 +80,13 @@ impl Db {
 
     /// Gives a list of all articles linking to this one
     pub fn links_query(&self, query: &'static str, to: Id) -> Vec<Id> {
-        self.inner.prepare_cached("SELECT `from` FROM link WHERE `to` = ?1 UNION SELECT `from` FROM redirect_link WHERE `to` = ?1")
+        self.inner.prepare_cached(query)
             .unwrap()
             .query((to,))
             .unwrap() 
             .mapped(|row: &Row| -> Result<Id, Error> { row.get(0) })
             .map(Result::unwrap)
             .collect()
-    }
-
-    pub fn add_named_link(&mut self, from: Id, to: &str) {
-
     }
 
     /// Adds a link from one article to another
@@ -135,7 +126,7 @@ mod test {
     fn open_clean_db() -> Db {
         let path = "file::memory:";
         let mut db = Db::new(path).unwrap();
-        db.initialize();
+        db.initialize().unwrap();
         db
     }
 
@@ -169,6 +160,19 @@ mod test {
 
 
         assert_eq!(&links, &[1,3]);
+
+    }
+
+    #[test]
+    fn sample_reverse_link_data() {
+        let mut db = open_clean_db();
+        db.add_link((1,2)).unwrap();
+        db.add_link((2,3)).unwrap();
+        db.add_link((3,2)).unwrap();
+
+
+        let links: Vec<_> = db.links_from(2);
+        assert_eq!(&links, &[3]);
 
     }
 

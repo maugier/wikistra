@@ -1,4 +1,4 @@
-use std::{fs::File, io::{BufReader, BufRead, SeekFrom, stdin}, collections::{BTreeMap}};
+use std::{fs::File, io::{BufReader, BufRead, SeekFrom, stdin}};
 
 use flate2::{bufread::GzDecoder};
 use indicatif::{self, ProgressBar, ProgressStyle, ProgressState};
@@ -17,7 +17,7 @@ pub type Id = u32;
 
 use sqlite::Db;
 use cli::*;
-use regex::{RegexBuilder};
+
 
 static DEFAULT_DB_PATH: &str = "./db.sq3";
 
@@ -40,8 +40,12 @@ fn main() -> Result<()> {
             let mut db = Db::new(DEFAULT_DB_PATH)?;
 
             if let Some(query) = query {
-                for (id, title) in &db.search(&query) {
-                    println!("[{}] {}", id, &**title)
+                for (id, title, redirect) in &db.search(&query) {
+                    if let Some(target) = redirect {
+                        println!("[{id}] {title} -> {target}")
+                    } else {
+                        println!("[{id}] {title}")
+                    }
                 }
             } else {
                 eprintln!("Enter one query per line.");
@@ -49,8 +53,12 @@ fn main() -> Result<()> {
                     let line = line?;
                     if line == "" { continue };
                     
-                    for (id, title) in &db.search(&line) {
-                        println!("[{}] {}", id, &**title)
+                    for (id, title, redirect) in &db.search(&line) {
+                        if let Some(target) = redirect {
+                            println!("[{id}] {title} -> {target}")
+                        } else {
+                            println!("[{id}] {title}")
+                        }
                     }
 
                 }
@@ -63,7 +71,7 @@ fn main() -> Result<()> {
         }
         Path { start, end } => {
             let db = sqlite::Db::new(DEFAULT_DB_PATH)?;
-            let path = map::path(&db, &start, &end)?;
+            let path = path::path(&db, &start, &end)?;
 
             println!("{}", path.join(" -> "));
 

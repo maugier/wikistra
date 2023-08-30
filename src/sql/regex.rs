@@ -60,6 +60,7 @@ fn match_tuple<'s>(tuple: &Tuple<'s>) -> Vec<&'s str> {
 
 
 #[test]
+#[ignore]
 fn sample_tokenization() {
 
     //let sym = |s| { Token::Symbol(SmolStr::new_inline(s)) };

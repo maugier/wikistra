@@ -3,6 +3,10 @@
 
 use std::collections::BTreeMap;
 
+use thiserror::Error;
+
+use crate::sqlite::Db;
+
 
 // Merge-union between two sorted lists, returns the first element appearing in both lists.
 // Input lists must be sorted or this function may fail to find matches.
@@ -67,7 +71,7 @@ impl <T: Ord + Copy> Front<T> {
     }
 }
 
-pub fn path<T,F1,F2,L1,L2>(start: T, goal: T, mut links_from: F1, mut links_to: F2) -> Option<Vec<T>>
+pub fn bidi_dijkstra<T,F1,F2,L1,L2>(start: T, goal: T, mut links_from: F1, mut links_to: F2) -> Option<Vec<T>>
 where
     T: Ord + Copy + std::fmt::Debug,
     F1: FnMut(&T) -> L1,
@@ -97,6 +101,30 @@ where
 
 }
 
+#[derive(Error,Debug)]
+pub enum PathError {
+    #[error("Unknown article: {0}")]
+    UnknownTitle(String),
+    #[error("No path found")]
+    NoPathFound
+}
+
+pub fn path(db: &Db, from: &str, to: &str) -> Result<Vec<String>, PathError> {
+    let from = db.index(from)
+        .ok_or_else(|| PathError::UnknownTitle(from.to_owned()))?;
+    let to = db.index(to)
+        .ok_or_else(|| PathError::UnknownTitle(to.to_owned()))?;  
+
+    let links_from = |from: &u32| db.links_from(*from);
+    let links_to = |to: &u32| db.links_to(*to);
+
+    let path = bidi_dijkstra(from, to, links_from, links_to)
+        .ok_or(PathError::NoPathFound)?;
+
+    Ok(path.iter().map(|&i| db.lookup(i).unwrap_or("???".to_owned())).collect::<Vec<_>>())
+
+}
+
 #[cfg(test)]
 mod test {
     use super::*;
@@ -114,7 +142,7 @@ mod test {
     fn try_path(edges: &[(i32, i32)], from: i32, to: i32) -> Option<Vec<i32>> {
         let links_from = |f: &i32| { let f = *f; edges.iter().filter(move |&(a,_)| *a == f).map(|(_,b)| b).copied() };
         let links_to = |t: &i32| { let t = *t; edges.iter().filter(move |&(_,b)| *b == t).map(|(a,_)| a).copied() };
-        path(from, to, links_from, links_to)
+        bidi_dijkstra(from, to, links_from, links_to)
     }
 
     #[test]
