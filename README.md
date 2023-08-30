@@ -5,11 +5,11 @@ article A in the smallest number of link clicks".
 
 ## Todo 
 
- [X] Parse the dumps
- [X] Build the index
- [X] Lookup single paths
- [ ] Build a map cache
- [ ] Use the map in lookups
+ - [X] Parse the dumps
+ - [X] Build the index
+ - [X] Lookup single paths
+ - [ ] Build a map cache
+ - [ ] Use the map in lookups
 
 ## Installation
 

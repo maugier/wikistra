@@ -11,6 +11,7 @@ mod source;
 mod map;
 mod memory;
 mod sqlite;
+mod path;
 
 pub type Id = u32;
 
