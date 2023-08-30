@@ -9,7 +9,6 @@ mod cli;
 mod sql;
 mod source;
 mod map;
-mod memory;
 mod sqlite;
 mod path;
 
