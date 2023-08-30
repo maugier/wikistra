@@ -51,7 +51,7 @@ impl Db {
 
     pub fn search(&mut self, regex: &str) -> Vec<(Id, String, Option<String>)> {
 
-        self.inner.prepare_cached("SELECT page.id, page.title, redirect.title FROM page LEFT JOIN redirect ON id = id WHERE page.title LIKE ?1")
+        self.inner.prepare_cached("SELECT page.id, page.title, redirect.title FROM page LEFT JOIN redirect ON page.id = redirect.id WHERE page.title LIKE ?1")
             .unwrap()
             .query((regex,))
             .unwrap()
