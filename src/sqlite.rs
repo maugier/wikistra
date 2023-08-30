@@ -1,6 +1,9 @@
 //! SQLite backend
 use rusqlite::{Connection, Error, Row, OpenFlags};
+use thiserror::Error;
 
+
+use crate::path::bidi_dijkstra;
 
 use super::Id;
 
@@ -15,6 +18,14 @@ impl Drop for Db {
     }
 }
 */
+
+#[derive(Error,Debug)]
+pub enum PathError {
+    #[error("Unknown article: {0}")]
+    UnknownTitle(String),
+    #[error("No path found")]
+    NoPathFound
+}
 
 impl Db {
 
@@ -116,6 +127,22 @@ impl Db {
         self.inner.query_row("SELECT title FROM page WHERE id = ?1", (id,), 
         |row| row.get(0))
         .ok()
+    }
+
+    pub fn path(&self, from: &str, to: &str) -> Result<Vec<String>, PathError> {
+        let from = self.index(from)
+            .ok_or_else(|| PathError::UnknownTitle(from.to_owned()))?;
+        let to = self.index(to)
+            .ok_or_else(|| PathError::UnknownTitle(to.to_owned()))?;  
+    
+        let links_from = |from: &u32| self.links_from(*from);
+        let links_to = |to: &u32| self.links_to(*to);
+    
+        let path = bidi_dijkstra(from, to, links_from, links_to)
+            .ok_or(PathError::NoPathFound)?;
+    
+        Ok(path.iter().map(|&i| self.lookup(i).unwrap_or("???".to_owned())).collect::<Vec<_>>())
+    
     }
 
 }

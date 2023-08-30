@@ -69,7 +69,7 @@ fn main() -> Result<()> {
         }
         Path { start, end } => {
             let db = sqlite::Db::new(DEFAULT_DB_PATH)?;
-            let path = path::path(&db, &start, &end)?;
+            let path = db.path(&start, &end)?;
 
             println!("{}", path.join(" -> "));
 
