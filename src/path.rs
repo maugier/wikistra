@@ -32,7 +32,9 @@ fn check_collision<T: Ord + Copy>(from: &mut Front<T>, to: &mut Front<T>) -> Opt
 
     let mut p = k;
     let mut path = vec![k];
-    while let Some(&p2) = from.map.get(&p) {
+    loop {
+        let p2 = *from.map.get(&p).expect("inconsistent Front state");
+        if p == p2 { break }
         path.push(p2);
         p = p2;
     }
@@ -40,7 +42,9 @@ fn check_collision<T: Ord + Copy>(from: &mut Front<T>, to: &mut Front<T>) -> Opt
     path.reverse();
 
     let mut n = k;
-    while let Some(&n2) = to.map.get(&n) {
+    loop {
+        let n2 = *to.map.get(&n).expect("inconsistent Front state");
+        if n == n2 { break }
         path.push(n2);
         n = n2;
     }
@@ -49,6 +53,13 @@ fn check_collision<T: Ord + Copy>(from: &mut Front<T>, to: &mut Front<T>) -> Opt
 }
 
 impl <T: Ord + Copy> Front<T> {
+    fn new(root: T) -> Self {
+        let edge = vec![root];
+        let mut map = BTreeMap::new();
+        map.insert(root, root);
+        Front { edge, map }
+    }
+
     fn len(&self) -> usize {
         self.map.len()
     }
@@ -69,6 +80,7 @@ impl <T: Ord + Copy> Front<T> {
         std::mem::swap(tmp, &mut self.edge);
         tmp.clear();
     }
+
 }
 
 pub fn bidi_dijkstra<T,F1,F2,L1,L2>(start: T, goal: T, mut links_from: F1, mut links_to: F2) -> Option<Vec<T>>
@@ -80,8 +92,8 @@ where
     L2: IntoIterator<Item=T>,
 {
 
-    let mut from = Front { edge: vec![start], map: BTreeMap::new() };
-    let mut to = Front { edge: vec![goal], map: BTreeMap::new() };
+    let mut from = Front::new(start);
+    let mut to = Front::new(goal);
 
     let mut tmp_edge = vec![];
 
