@@ -8,11 +8,13 @@ pub struct Db {
     inner: Connection,
 }
 
+/*
 impl Drop for Db {
     fn drop(&mut self) {
         let _ = self.inner.execute_batch("PRAGMA optimize;");
     }
 }
+*/
 
 impl Db {
 
