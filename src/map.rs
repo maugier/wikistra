@@ -15,7 +15,7 @@ pub struct Map<'d> {
 
 fn successors<'d>(db: &'d Db) -> impl Fn(&Id) -> Box<dyn Iterator<Item=(Id,usize)> + 'd> {
     |&to| {
-        Box::new(db.links(to).into_iter()
+        Box::new(db.links_to(to).into_iter()
             .map(|id| (id, 1)))
     }
 }
@@ -53,7 +53,7 @@ impl<'d> Map<'d> {
         while !current.is_empty() {
 
             for &c in &current {
-                let links = db.links(to);
+                let links = db.links_to(to);
                 map.extend(links.iter().map(|&f| (c,f)));
                 next.extend(links);
             }

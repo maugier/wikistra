@@ -44,6 +44,8 @@ impl Db {
             CREATE TABLE link(`to` int(8), `from` int(8), primary key (`to`, `from`)) without rowid;
             CREATE TABLE redirect (id int(8) primary key, title text) without rowid;
             CREATE TABLE redirect_link (`to` int(8), `from` int(8), primary key (`to`, `from`));
+            CREATE INDEX link_reverse ON link(`from`);
+            CREATE INDEX redirect_link_reverse ON redirect_link(`from`);
         ")
     }
 
@@ -71,8 +73,18 @@ impl Db {
         Ok(())
     }
 
+    pub fn links_to(&self, to: Id) -> Vec<Id> {
+        let query = "SELECT `from` FROM link WHERE `to` = ?1 UNION SELECT `from` FROM redirect_link WHERE `to` = ?1";
+        self.links_query(query, to)
+    }
+
+    pub fn links_from(&self, from: Id) -> Vec<Id> {
+        let query = "SELECT `to` FROM link WHERE `from` = ?1 UNION SELECT `to` FROM redirect_link WHERE `from` = ?1";
+        self.links_query(query, from)
+    }
+
     /// Gives a list of all articles linking to this one
-    pub fn links(&self, to: Id) -> Vec<Id> {
+    pub fn links_query(&self, query: &'static str, to: Id) -> Vec<Id> {
         self.inner.prepare_cached("SELECT `from` FROM link WHERE `to` = ?1 UNION SELECT `from` FROM redirect_link WHERE `to` = ?1")
             .unwrap()
             .query((to,))
@@ -152,7 +164,7 @@ mod test {
         db.add_link((3,2)).unwrap();
 
 
-        let mut links: Vec<_> = db.links(2);
+        let mut links: Vec<_> = db.links_to(2);
         links.sort();
 
 
