@@ -6,7 +6,7 @@ use smol_str::SmolStr;
 use thiserror::Error;
 use utf8_decode::UnsafeDecoder;
 
-pub mod regex;
+//pub mod regex;
 
 pub struct Loader {
     source: Peekable<Fuse<Tokenizer>>,
