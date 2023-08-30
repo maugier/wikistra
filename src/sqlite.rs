@@ -103,7 +103,7 @@ impl Db {
     pub fn index(&self, name: &str) -> Option<Id> {
         self.inner.query_row("SELECT id FROM page WHERE title = ?1", (name,),
         |row| row.get(0))
-        .unwrap_or_else(|e| panic!("Boom: {}", e))
+        .ok().flatten()
     }
 
     /// Lookup the article title given its ID
