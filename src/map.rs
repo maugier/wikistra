@@ -10,7 +10,7 @@ use thiserror::Error;
 pub struct Map<'d> {
     db: &'d Db,
     to: Id,
-    map: HashMap<Id, (Id, usize)>,
+    map: HashMap<Id, Id>,  // map node to next hop
 }
 
 fn successors<'d>(db: &'d Db) -> impl Fn(&Id) -> Box<dyn Iterator<Item=(Id,usize)> + 'd> {
@@ -46,22 +46,42 @@ impl<'d> Map<'d> {
 
         let to = db.index(to)?;
 
-        let map = dijkstra_all(&to, successors(db));
+        let mut map = HashMap::new();
+        let mut current = vec![to];
+        let mut next = vec![];
+
+        while !current.is_empty() {
+
+            for &c in &current {
+                let links = db.links(to);
+                map.extend(links.iter().map(|&f| (c,f)));
+                next.extend(links);
+            }
+            std::mem::swap(&mut current, &mut next);
+            next.clear();
+        }
 
         Some(Self { db, to, map })
     }
 
     pub fn find<'a>(&self, from: &str) -> Option<Vec<String>> {
         let mut path = vec![from.to_owned()];
+        let mut current = self.db.index(from)?;
 
-        let mut from = self.db.index(from)?;
-
-        while from != self.to {
-            from = self.map.get(&from)?.0;
-            path.push(self.db.lookup(from)?)            
+        while current != self.to {
+            current = *self.map.get(&current)?;
+            path.push(self.db.lookup(current)?);
         }
 
         Some(path)
+    }
+
+    pub fn save(&self, path: &str) {
+        todo!()
+    }
+
+    pub fn load(db: &Db, path: &str) -> Self {
+        todo!()
     }
 
 }
