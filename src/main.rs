@@ -1,6 +1,6 @@
 use std::{fs::File, io::{BufReader, BufRead, SeekFrom, stdin}};
 
-use flate2::{bufread::GzDecoder};
+use flate2::bufread::GzDecoder;
 use indicatif::{self, ProgressBar, ProgressStyle, ProgressState};
 use color_eyre::{Result, eyre::eyre};
 
@@ -16,26 +16,31 @@ pub type Id = u32;
 use sqlite::Db;
 use cli::*;
 
-
-static DEFAULT_DB_PATH: &str = "./db.sq3";
+fn db_path(wikiname: &str, path: &Option<String>) -> String {
+    path.as_ref()
+        .map(|p| p.clone())
+        .unwrap_or_else(|| format!("./{}-db.sq3", wikiname))
+}
 
 fn main() -> Result<()> {
 
     color_eyre::install()?;
     let args = cli::parse();
 
+    let db_path = db_path(&args.wikiname, &args.db_path);
+
     match args.cmd {
-        Download => source::download()?,
+        Download => source::download(&args.wikiname)?,
         Index { mode } => {
-            let mut db = Db::new(DEFAULT_DB_PATH)?;
-            if let Some(Table::Page) | None = mode { build_page_index(&mut db)?; }
-            if let Some(Table::Redirect) | None = mode { build_redirect_index(&mut db)?; }
-            if let Some(Table::Link) | None = mode { build_link_index(&mut db)?; }
+            let mut db = Db::new(&db_path)?;
+            if let Some(Table::Page) | None = mode { build_page_index(&mut db, &args.wikiname)?; }
+            if let Some(Table::Redirect) | None = mode { build_redirect_index(&mut db, &args.wikiname)?; }
+            if let Some(Table::Link) | None = mode { build_link_index(&mut db, &args.wikiname)?; }
         },    
 
         Search { query } => {
                 
-            let mut db = Db::new(DEFAULT_DB_PATH)?;
+            let mut db = Db::new(&db_path)?;
 
             if let Some(query) = query {
                 for (id, title, redirect) in &db.search(&query) {
@@ -65,10 +70,10 @@ fn main() -> Result<()> {
         }
 
         Parse { table } => {
-            parse_table(table.into())?
+            parse_table(&args.wikiname, table.into())?
         }
         Path { start, end } => {
-            let db = sqlite::Db::new(DEFAULT_DB_PATH)?;
+            let db = sqlite::Db::new(&db_path)?;
             let path = db.path(&start, &end)?;
 
             println!("{}", path.join(" -> "));
@@ -110,9 +115,11 @@ fn open_gz_with_progress(path: &str) -> Result<(impl BufRead, ProgressBar), std:
     Ok((reader, progress))
 }
 
-fn build_page_index(db: &mut Db) -> Result<()> {
+fn build_page_index(db: &mut Db, wikiname: &str) -> Result<()> {
 
-    let (source, progress) = open_gz_with_progress("./enwiki-latest-page.sql.gz")?;
+    let path = format!("./{}-latest-page.sql.gz", wikiname);
+
+    let (source, progress) = open_gz_with_progress(&path)?;
     progress.set_message("Building title index");
 
     let (mut count, mut good) = (0,0);
@@ -135,11 +142,12 @@ fn build_page_index(db: &mut Db) -> Result<()> {
     Ok(())
 }
 
-fn build_link_index(db: &mut Db) -> Result<()> {
+fn build_link_index(db: &mut Db, wikiname: &str) -> Result<()> {
     
     let (mut count, mut good, mut skip, mut bad) = (0,0,0,0);
+    let path = format!("./{}-latest-pagelinks.sql.gz", wikiname);
 
-    let (source, progress) = open_gz_with_progress("./enwiki-latest-pagelinks.sql.gz")?;
+    let (source, progress) = open_gz_with_progress(&path)?;
     progress.set_message("Building link map");
 
     for line in sql::Loader::load(source)? {
@@ -176,9 +184,11 @@ fn build_link_index(db: &mut Db) -> Result<()> {
     Ok(())
 }
 
-fn build_redirect_index(db: &mut Db) -> Result<()> {
+fn build_redirect_index(db: &mut Db, wikiname: &str) -> Result<()> {
 
-    let (source, progress) = open_gz_with_progress("./enwiki-latest-redirect.sql.gz")?;
+    let path = format!("./{}-latest-redirect.sql.gz", wikiname);
+
+    let (source, progress) = open_gz_with_progress(&path)?;
     progress.set_message("Building redirect index");
 
     let (mut count, mut good) = (0,0);
@@ -201,9 +211,9 @@ fn build_redirect_index(db: &mut Db) -> Result<()> {
     Ok(())
 }
 
-fn parse_table(table: usize) -> Result<()> {
+fn parse_table(wikiname: &str, table: usize) -> Result<()> {
 
-    let filename = source::files().nth(table)
+    let filename = source::files(wikiname).nth(table)
         .ok_or(eyre!("No such table"))?;
 
     for row in sql::Loader::load_gz_file(&filename)? {

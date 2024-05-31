@@ -10,14 +10,25 @@ pub fn parse() -> Args {
 pub struct Args {
     #[command(subcommand)]
     pub cmd: Command,
-    #[arg(short, long, default_value="./db")]
-    pub db_path: String,
+
+    /// Database path (default: ./<wikiname>-db.sq3)
+    #[arg(short, long)]
+    pub db_path: Option<String>,
+
+    /// Name of the wiki to dump from Wikimedia archives
+    #[arg(short, long, default_value="enwiki")]
+    pub wikiname: String,
 }
 
 #[derive(PartialEq,Eq,Debug,ValueEnum,Clone,Copy)]
 pub enum Table {
+    /// Maps article names to article IDs
     Page,
+
+    /// Maps redirected articles to the redirection target
     Redirect,
+
+    /// IDs of articles related by a link
     Link,
 }
 
@@ -34,7 +45,7 @@ impl Into<usize> for Table {
 
 #[derive(Subcommand)]
 pub enum Command {
-    /// Manage source files
+    /// Download dumps from the 
     Download,
 
     /// Parse sql files into CSV

@@ -7,15 +7,13 @@ use ureq::{self, Response};
 
 static NAMES: [&str; 3] = ["page", "redirect", "pagelinks"];
 
-static URL_BASE: &str = "https://dumps.wikimedia.org/enwiki/latest";
-
-pub fn files() -> impl Iterator<Item = String> {
+pub fn files(wikiname: &str) -> impl Iterator<Item = String> + '_ {
     NAMES.iter()
-        .map(|n| format!("enwiki-latest-{}.sql.gz", n))
+        .map(move |n| format!("{}-latest-{}.sql.gz", wikiname, n))
 }
 
-pub fn urls() -> impl Iterator<Item = String> {
-    NAMES.iter().map(|f| format!("{}/enwiki-latest-{}.sql.gz", URL_BASE, f))
+pub fn urls(wikiname: &str) -> impl Iterator<Item = String> + '_ {
+    NAMES.iter().map(move |f| format!("https://dumps.wikimedia.org/{0}/latest/{0}-latest-{1}.sql.gz", wikiname, f))
 }
 
 /// A parsed HTTP Content-Range header
@@ -60,7 +58,7 @@ pub fn is_fresh(agent: &ureq::Agent, url: &str, path: &str) -> Option<()> {
 }
 
 /// Download the source files. Resuming supported.
-pub fn download() -> Result<()> { 
+pub fn download(wikiname: &str) -> Result<()> { 
 
     let style = ProgressStyle::with_template("[{elapsed_precise}] [{wide_bar:.cyan/blue}] {bytes}/{total_bytes} ({eta})").unwrap()
         .with_key("eta", |state: &ProgressState, w: &mut dyn std::fmt::Write| { 
@@ -70,7 +68,7 @@ pub fn download() -> Result<()> {
 
     let agent = ureq::AgentBuilder::new()
         .build();
-    for (url, path) in urls().zip(files()) {
+    for (url, path) in urls(wikiname).zip(files(wikiname)) {
 
         if is_fresh(&agent, &url, &path).is_some() {
             eprintln!("{} already present.", path);
@@ -85,7 +83,7 @@ pub fn download() -> Result<()> {
         file.seek(std::io::SeekFrom::End(0))?;
         let resume = file.stream_position()?;
 
-        eprintln!("Existing file is {}", resume);
+        eprintln!("{} is {} bytes long", &path, resume);
 
         let response = agent.get(&url)
             .set("Range", &format!("bytes={}-", resume))
@@ -97,7 +95,7 @@ pub fn download() -> Result<()> {
             0
         };
 
-        eprintln!("Starting download at offset {}", pos);
+        eprintln!("Starting download of {} at offset {}", &path, pos);
 
         file.seek(std::io::SeekFrom::Start(pos))?;
 
